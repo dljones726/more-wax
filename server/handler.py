@@ -18,6 +18,7 @@ from pathlib import Path
 import urllib.request as _urllib_request
 
 import server.auth as _auth
+import server.backup as _backup
 import server.config as _config
 import server.discogs as _discogs_mod
 from server.config import DATA_DIR, STATIC_DIR
@@ -237,6 +238,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self._check_auth():
             return
 
+        # Drive backup connect flow (session required — settings action)
+        if p == "/auth/drive/connect":
+            return _backup.handle_connect(self)
+        elif p == "/auth/drive/callback":
+            return _backup.handle_callback(self)
+
         if p in ("/", "/index.html"):
             self.send_file(STATIC_DIR / "index.html")
         elif p.startswith("/static/"):
@@ -295,6 +302,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json({"in_collection": discogs_check_collection(rid)})
         elif p == "/api/listens":
             self._api_listens_list()
+        elif p == "/api/backup/status":
+            self.send_json(_backup.backup_status())
         else:
             self._404()
 
@@ -331,6 +340,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._api_sync_import()
         elif p == "/api/listens":
             self._api_listens_add()
+        elif p == "/api/backup/now":
+            result = _backup.backup_now()
+            self.send_json(result, 200 if result.get("success") else 502)
+        elif p == "/api/backup/disconnect":
+            _backup.disconnect()
+            self.send_json({"success": True})
         else:
             self._404()
 
