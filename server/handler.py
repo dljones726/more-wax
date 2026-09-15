@@ -11,6 +11,7 @@ import http.server
 import json
 import mimetypes
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -190,118 +191,32 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif p == "/auth/drive/callback":
             return _backup.handle_callback(self)
 
-        if p in ("/", "/index.html"):
-            self.send_file(STATIC_DIR / "index.html")
-        elif p.startswith("/static/"):
-            f = self._safe_resolve("static", p[8:])
-            self.send_file(f) if f else self._404()
-        elif p.startswith("/covers/"):
-            f = self._safe_resolve("data", p[1:])
-            self.send_file(f) if f else self._404()
-        elif p.startswith("/api/cover-proxy"):
-            self._api_cover_proxy()
-        elif p == "/api/status":
-            self._api_status()
-        elif p == "/api/collection":
-            self._respond(_collection.handle_list())
-        elif p.startswith("/api/collection/") and p.endswith("/details"):
-            self._respond(
-                _collection.handle_details(self._tail_id(p[: -len("/details")]))
-            )
-        elif p.startswith("/api/collection/"):
-            self._respond(_collection.handle_get(self._tail_id(p)))
-        elif p == "/api/settings":
-            self._respond(_settings_api.handle_get_settings())
-        elif p == "/api/export":
-            self._api_export()
-        elif p == "/api/sync/status":
-            self._respond(_sync_api.handle_status())
-        elif p == "/api/discogs/search":
-            q = self._query()
-            self._respond(
-                _discogs_api.handle_search(
-                    q.get("q", [""])[0], q.get("barcode", [""])[0]
-                )
-            )
-        elif p.startswith("/api/discogs/release/"):
-            self._respond(_discogs_api.handle_release(p.split("/")[-1]))
-        elif p.startswith("/api/discogs/prices/"):
-            self._respond(_discogs_api.handle_prices(p.split("/")[-1]))
-        elif p.startswith("/api/discogs/in-collection/"):
-            self._respond(_discogs_api.handle_in_collection(p.split("/")[-1]))
-        elif p == "/api/listens":
-            self._respond(
-                _listens_api.handle_list(self._query().get("record_id", [None])[0])
-            )
-        elif p == "/api/backup/status":
-            self.send_json(_backup.backup_status())
-        else:
-            self._404()
+        self._dispatch("GET", p)
 
     def do_POST(self):
         if not self._check_auth():
             return
-        p = self.path_parts()
-        if p == "/api/setup":
-            self._respond(_settings_api.handle_setup(self.read_json()))
-        elif p == "/api/setup/validate":
-            self._respond(_settings_api.handle_setup_validate(self.read_json()))
-        elif p == "/api/settings":
-            self._respond(
-                _settings_api.handle_update_settings(
-                    self.read_json(), self._settings_redirect_uri()
-                )
-            )
-        elif p == "/api/collection":
-            self._respond(_collection.handle_add(self.read_json()))
-        elif p == "/api/upload-cover":
-            self._respond(_media.handle_upload_cover(self.read_json()))
-        elif p == "/api/convert-image":
-            self._respond(_media.handle_convert_image(self.read_json()))
-        elif p == "/api/identify-cover":
-            self._respond(_media.handle_identify_cover(self.read_json()))
-        elif p.startswith("/api/discogs/add-to-collection/"):
-            self._respond(_collection.handle_add_to_collection(p.split("/")[-1]))
-        elif p == "/api/collection/refresh-prices":
-            self._respond(
-                _collection.handle_refresh_all_prices("force" in self._query())
-            )
-        elif p == "/api/sync/fetch":
-            self._respond(_sync_api.handle_fetch())
-        elif p == "/api/sync/import":
-            self._respond(_sync_api.handle_import(self.read_json()))
-        elif p == "/api/listens":
-            self._respond(_listens_api.handle_add(self.read_json()))
-        elif p == "/api/backup/now":
-            result = _backup.backup_now()
-            self.send_json(result, 200 if result.get("success") else 502)
-        elif p == "/api/backup/disconnect":
-            _backup.disconnect()
-            self.send_json({"success": True})
-        else:
-            self._404()
+        self._dispatch("POST", self.path_parts())
 
     def do_PUT(self):
         if not self._check_auth():
             return
-        p = self.path_parts()
-        if p.startswith("/api/collection/"):
-            self._respond(_collection.handle_update(self._tail_id(p), self.read_json()))
-        else:
-            self._404()
+        self._dispatch("PUT", self.path_parts())
 
     def do_DELETE(self):
         if not self._check_auth():
             return
-        p = self.path_parts()
-        if p.startswith("/api/discogs/collection/"):
-            self._respond(_discogs_api.handle_remove_from_collection(p.split("/")[-1]))
-        elif p.startswith("/api/collection/"):
-            self._respond(_collection.handle_delete(self._tail_id(p)))
-        elif p.startswith("/api/listens/"):
-            self._respond(_listens_api.handle_delete(self._tail_id(p)))
-        else:
-            self._404()
+        self._dispatch("DELETE", self.path_parts())
+
+    def _dispatch(self, method: str, p: str):
+        """Match (method, path) against the route table; invoke the handler."""
+        for m, matcher, fn in _ROUTES:
+            if m != method:
+                continue
+            params = matcher(p)
+            if params is not None:
+                return fn(self, params)
+        self._404()
 
     def _respond(self, result):
         """Serialise an (status, payload) tuple from an api.* handler."""
@@ -492,3 +407,219 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(data)
         except Exception:
             self._404()
+
+
+# ── route table ──────────────────────────────────────────────────
+#
+# Each entry is (method, matcher, handler). ``matcher(path)`` returns a dict of
+# captured params (possibly empty) on a match, else None. ``handler(h, params)``
+# sends the response. Adding an endpoint is a one-line entry here — no more
+# growing an if/elif ladder. Auth-route dispatch and the auth gate stay in the
+# do_* methods above; this table covers everything past the gate.
+
+
+def _compile(pattern: str):
+    """Build a path matcher. ``{name}`` captures one segment ([^/]+); ``{name*}``
+    captures a trailing path (.+). A pattern with no braces is an exact match."""
+    if "{" not in pattern:
+        return lambda p: {} if p == pattern else None
+    parts = []
+    for seg in pattern.split("/"):
+        if seg.startswith("{") and seg.endswith("}"):
+            name = seg[1:-1]
+            if name.endswith("*"):
+                parts.append(f"(?P<{name[:-1]}>.+)")
+            else:
+                parts.append(f"(?P<{name}>[^/]+)")
+        else:
+            parts.append(re.escape(seg))
+    rx = re.compile("^" + "/".join(parts) + "$")
+    return lambda p: m.groupdict() if (m := rx.match(p)) else None
+
+
+def _to_int(s) -> int:
+    try:
+        return int(s)
+    except (TypeError, ValueError):
+        return -1
+
+
+def _serve_index(h, _params):
+    h.send_file(STATIC_DIR / "index.html")
+
+
+def _serve_base(h, base_key: str, rel: str):
+    f = h._safe_resolve(base_key, rel)
+    h.send_file(f) if f else h._404()
+
+
+def _search_args(h):
+    q = h._query()
+    return q.get("q", [""])[0], q.get("barcode", [""])[0]
+
+
+def _backup_now(h):
+    result = _backup.backup_now()
+    h.send_json(result, 200 if result.get("success") else 502)
+
+
+def _backup_disconnect(h):
+    _backup.disconnect()
+    h.send_json({"success": True})
+
+
+def _R(method, pattern, fn):
+    return (method, _compile(pattern), fn)
+
+
+_ROUTES = [
+    # ── GET: files & pages ──
+    _R("GET", "/", _serve_index),
+    _R("GET", "/index.html", _serve_index),
+    _R("GET", "/static/{path*}", lambda h, prm: _serve_base(h, "static", prm["path"])),
+    _R(
+        "GET",
+        "/covers/{path*}",
+        lambda h, prm: _serve_base(h, "data", "covers/" + prm["path"]),
+    ),
+    # ── GET: JSON / streams ──
+    _R("GET", "/api/cover-proxy", lambda h, _: h._api_cover_proxy()),
+    _R("GET", "/api/status", lambda h, _: h._api_status()),
+    _R("GET", "/api/collection", lambda h, _: h._respond(_collection.handle_list())),
+    _R(
+        "GET",
+        "/api/collection/{id}/details",
+        lambda h, prm: h._respond(_collection.handle_details(_to_int(prm["id"]))),
+    ),
+    _R(
+        "GET",
+        "/api/collection/{id}",
+        lambda h, prm: h._respond(_collection.handle_get(_to_int(prm["id"]))),
+    ),
+    _R(
+        "GET",
+        "/api/settings",
+        lambda h, _: h._respond(_settings_api.handle_get_settings()),
+    ),
+    _R("GET", "/api/export", lambda h, _: h._api_export()),
+    _R("GET", "/api/sync/status", lambda h, _: h._respond(_sync_api.handle_status())),
+    _R(
+        "GET",
+        "/api/discogs/search",
+        lambda h, _: h._respond(_discogs_api.handle_search(*_search_args(h))),
+    ),
+    _R(
+        "GET",
+        "/api/discogs/release/{id}",
+        lambda h, prm: h._respond(_discogs_api.handle_release(prm["id"])),
+    ),
+    _R(
+        "GET",
+        "/api/discogs/prices/{id}",
+        lambda h, prm: h._respond(_discogs_api.handle_prices(prm["id"])),
+    ),
+    _R(
+        "GET",
+        "/api/discogs/in-collection/{id}",
+        lambda h, prm: h._respond(_discogs_api.handle_in_collection(prm["id"])),
+    ),
+    _R(
+        "GET",
+        "/api/listens",
+        lambda h, _: h._respond(
+            _listens_api.handle_list(h._query().get("record_id", [None])[0])
+        ),
+    ),
+    _R("GET", "/api/backup/status", lambda h, _: h.send_json(_backup.backup_status())),
+    # ── POST ──
+    _R(
+        "POST",
+        "/api/setup",
+        lambda h, _: h._respond(_settings_api.handle_setup(h.read_json())),
+    ),
+    _R(
+        "POST",
+        "/api/setup/validate",
+        lambda h, _: h._respond(_settings_api.handle_setup_validate(h.read_json())),
+    ),
+    _R(
+        "POST",
+        "/api/settings",
+        lambda h, _: h._respond(
+            _settings_api.handle_update_settings(
+                h.read_json(), h._settings_redirect_uri()
+            )
+        ),
+    ),
+    _R(
+        "POST",
+        "/api/collection",
+        lambda h, _: h._respond(_collection.handle_add(h.read_json())),
+    ),
+    _R(
+        "POST",
+        "/api/upload-cover",
+        lambda h, _: h._respond(_media.handle_upload_cover(h.read_json())),
+    ),
+    _R(
+        "POST",
+        "/api/convert-image",
+        lambda h, _: h._respond(_media.handle_convert_image(h.read_json())),
+    ),
+    _R(
+        "POST",
+        "/api/identify-cover",
+        lambda h, _: h._respond(_media.handle_identify_cover(h.read_json())),
+    ),
+    _R(
+        "POST",
+        "/api/discogs/add-to-collection/{id}",
+        lambda h, prm: h._respond(_collection.handle_add_to_collection(prm["id"])),
+    ),
+    _R(
+        "POST",
+        "/api/collection/refresh-prices",
+        lambda h, _: h._respond(
+            _collection.handle_refresh_all_prices("force" in h._query())
+        ),
+    ),
+    _R("POST", "/api/sync/fetch", lambda h, _: h._respond(_sync_api.handle_fetch())),
+    _R(
+        "POST",
+        "/api/sync/import",
+        lambda h, _: h._respond(_sync_api.handle_import(h.read_json())),
+    ),
+    _R(
+        "POST",
+        "/api/listens",
+        lambda h, _: h._respond(_listens_api.handle_add(h.read_json())),
+    ),
+    _R("POST", "/api/backup/now", lambda h, _: _backup_now(h)),
+    _R("POST", "/api/backup/disconnect", lambda h, _: _backup_disconnect(h)),
+    # ── PUT ──
+    _R(
+        "PUT",
+        "/api/collection/{id}",
+        lambda h, prm: h._respond(
+            _collection.handle_update(_to_int(prm["id"]), h.read_json())
+        ),
+    ),
+    # ── DELETE ──
+    _R(
+        "DELETE",
+        "/api/discogs/collection/{id}",
+        lambda h, prm: h._respond(
+            _discogs_api.handle_remove_from_collection(prm["id"])
+        ),
+    ),
+    _R(
+        "DELETE",
+        "/api/collection/{id}",
+        lambda h, prm: h._respond(_collection.handle_delete(_to_int(prm["id"]))),
+    ),
+    _R(
+        "DELETE",
+        "/api/listens/{id}",
+        lambda h, prm: h._respond(_listens_api.handle_delete(_to_int(prm["id"]))),
+    ),
+]

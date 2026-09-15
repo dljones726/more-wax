@@ -98,6 +98,34 @@ class TestHandlerRouting(unittest.TestCase):
             urlopen(f"{self.base}/nonexistent")
         self.assertEqual(ctx.exception.code, 404)
 
+    # ── Auth gate ─────────────────────────────────────────────
+
+    def test_auth_gate_blocks_api_but_allows_static(self):
+        """With OAuth configured and a proxied request that has no session,
+        /api/* returns 401 while static assets stay public."""
+        with (
+            mock.patch(
+                "server.config.GOOGLE_CLIENT_ID", "cid.apps.googleusercontent.com"
+            ),
+            mock.patch("server.config.GOOGLE_CLIENT_SECRET", "secret"),
+        ):
+            # Proxied (X-Forwarded-For) + no cookie → API blocked
+            api_req = Request(
+                f"{self.base}/api/collection",
+                headers={"X-Forwarded-For": "1.2.3.4"},
+            )
+            with self.assertRaises(HTTPError) as ctx:
+                urlopen(api_req)
+            self.assertEqual(ctx.exception.code, 401)
+
+            # Static assets remain public even behind the gate
+            static_req = Request(
+                f"{self.base}/static/test.txt",
+                headers={"X-Forwarded-For": "1.2.3.4"},
+            )
+            with urlopen(static_req) as resp:
+                self.assertEqual(resp.status, 200)
+
     # ── Path traversal protection ─────────────────────────────
 
     def test_static_path_traversal_blocked(self):
