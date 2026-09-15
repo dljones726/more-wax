@@ -13,9 +13,8 @@ import threading
 import time
 import urllib.error
 import urllib.parse
-from pathlib import Path
-
 import urllib.request as _urllib_request
+from pathlib import Path
 
 import server.auth as _auth
 import server.backup as _backup
@@ -261,7 +260,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif p.startswith("/api/cover-proxy"):
             self._api_cover_proxy()
         elif p == "/api/status":
-            from server.version import VERSION, BUILD_DATE, GIT_REVISION
+            from server.version import BUILD_DATE, GIT_REVISION, VERSION
 
             self.send_json(
                 {
@@ -674,9 +673,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         A valid client_id/secret will return 'invalid_grant' (no real code).
         An invalid client will return 'invalid_client'.
         """
-        import urllib.request
-        import urllib.parse
         import urllib.error
+        import urllib.parse
+        import urllib.request
 
         # Build redirect URI from the current request's host
         host = (

@@ -15,11 +15,13 @@ import time
 
 from server.database import (
     _db_add_unlocked,
-    _lock as _db_lock,
     db_delete,
     db_find_duplicate,
     db_list,
     db_update,
+)
+from server.database import (
+    _lock as _db_lock,
 )
 from server.discogs import _discogs_request, discogs_fetch_collection
 

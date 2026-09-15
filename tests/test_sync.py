@@ -400,7 +400,7 @@ class TestSync(unittest.TestCase):
         self.assertEqual(result["imported"], 2)
         self.assertEqual(result["replaced"], 1)
 
-        from server.database import db_list, db_get
+        from server.database import db_get, db_list
 
         records = db_list()
         ids = [r["discogs_id"] for r in records]

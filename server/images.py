@@ -19,7 +19,6 @@ import server.config as _config
 from server.config import COVERS_DIR
 from server.database import db_update
 
-
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024  # 15 MB decoded limit
 
 

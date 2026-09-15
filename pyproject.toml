@@ -1,0 +1,17 @@
+# Tooling configuration for More'Wax.
+#
+# This project ships no Python package (it is run directly / via Docker), so this
+# file intentionally configures dev tooling only — there is no [project] table and
+# no runtime dependencies. Keeping ruff's rules pinned here makes CI deterministic:
+# the lint/format jobs install ruff unpinned, so without an explicit selection a new
+# ruff release could change the effective default rule set and break CI on unrelated
+# commits.
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"  # lowest Python version CI runs against
+
+[tool.ruff.lint]
+# Classic ruff default (pyflakes + a curated subset of pycodestyle) plus import
+# sorting. The codebase passes this set cleanly; expand deliberately, not implicitly.
+select = ["E4", "E7", "E9", "F", "I"]

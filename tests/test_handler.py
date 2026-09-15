@@ -10,8 +10,8 @@ from http.server import HTTPServer
 from pathlib import Path
 from threading import Thread
 from unittest import mock
-from urllib.request import Request, urlopen
 from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 # Patch config before importing handler
 _tmp = tempfile.mkdtemp(prefix="morewax_handler_test_")

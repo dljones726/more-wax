@@ -8,8 +8,9 @@ import unittest
 
 class TestConfig(unittest.TestCase):
     def test_paths_exist_as_path_objects(self):
-        from server.config import BASE_DIR, STATIC_DIR, DATA_DIR, COVERS_DIR, DB_FILE
         from pathlib import Path
+
+        from server.config import BASE_DIR, COVERS_DIR, DATA_DIR, DB_FILE, STATIC_DIR
 
         self.assertIsInstance(BASE_DIR, Path)
         self.assertIsInstance(STATIC_DIR, Path)
@@ -18,7 +19,7 @@ class TestConfig(unittest.TestCase):
         self.assertIsInstance(DB_FILE, Path)
 
     def test_path_hierarchy(self):
-        from server.config import BASE_DIR, STATIC_DIR, DATA_DIR, COVERS_DIR, DB_FILE
+        from server.config import BASE_DIR, COVERS_DIR, DATA_DIR, DB_FILE, STATIC_DIR
 
         self.assertEqual(STATIC_DIR, BASE_DIR / "static")
         self.assertEqual(DATA_DIR, BASE_DIR / "data")

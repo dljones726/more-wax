@@ -401,7 +401,7 @@ class TestRateLimit(unittest.TestCase):
         self.assertFalse(_check_rate_limit(f"unique-{time.time_ns()}"))
 
     def test_many_requests_eventually_limited(self):
-        from server.auth import _check_rate_limit, _CALLBACK_MAX_ATTEMPTS
+        from server.auth import _CALLBACK_MAX_ATTEMPTS, _check_rate_limit
 
         key = f"flood-{time.time_ns()}"
         results = [_check_rate_limit(key) for _ in range(_CALLBACK_MAX_ATTEMPTS + 5)]
