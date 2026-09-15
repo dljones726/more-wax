@@ -145,6 +145,42 @@ def convert_image(img_data: str) -> dict:
         _cleanup(src_path, dst_path)
 
 
+_VISION_FIELDS = (
+    "artist",
+    "title",
+    "label",
+    "catalog_number",
+    "country",
+    "year",
+    "barcode",
+    "format_details",
+)
+
+
+def _parse_vision_response(text: str) -> dict:
+    """Parse Claude's cover-ID reply into a result dict.
+
+    Handles the ```json … ``` fences Claude sometimes adds. Returns a
+    ``{"success": True, ...fields}`` dict when an artist or title was found,
+    else ``{"success": False, "error": ...}``. Raises ``json.JSONDecodeError``
+    on unparseable text (the caller maps that to a friendly error).
+    """
+    # Claude sometimes wraps JSON in ```json ... ``` — strip that
+    if text.startswith("```"):
+        parts = text.split("```")
+        if len(parts) >= 3:
+            inner = parts[1]
+            if inner.startswith("json"):
+                inner = inner[4:]
+            text = inner.strip()
+
+    parsed = json.loads(text)
+    fields = {k: parsed.get(k, "").strip() for k in _VISION_FIELDS}
+    if fields["artist"] or fields["title"]:
+        return {"success": True, **fields}
+    return {"success": False, "error": "Could not identify record"}
+
+
 def identify_cover(img_data: str) -> dict:
     """Send a cover image to Claude Vision and return artist + title."""
     if not _config.ANTHROPIC_API_KEY:
@@ -234,42 +270,15 @@ def identify_cover(img_data: str) -> dict:
         text = content[0]["text"].strip()
         print(f"  [identify] Claude replied: {text!r}")
 
-        # Claude sometimes wraps JSON in ```json ... ``` — strip that
-        if text.startswith("```"):
-            parts = text.split("```")
-            if len(parts) >= 3:
-                inner = parts[1]
-                if inner.startswith("json"):
-                    inner = inner[4:]
-                text = inner.strip()
-
-        parsed = json.loads(text)
-        artist = parsed.get("artist", "").strip()
-        title = parsed.get("title", "").strip()
-        label = parsed.get("label", "").strip()
-        catalog_number = parsed.get("catalog_number", "").strip()
-        country = parsed.get("country", "").strip()
-        year = parsed.get("year", "").strip()
-        barcode = parsed.get("barcode", "").strip()
-        format_details = parsed.get("format_details", "").strip()
-        print(
-            f"  [identify] → artist={artist!r} title={title!r} label={label!r} cat={catalog_number!r} country={country!r} barcode={barcode!r}"
-        )
-
-        if artist or title:
-            return {
-                "success": True,
-                "artist": artist,
-                "title": title,
-                "label": label,
-                "catalog_number": catalog_number,
-                "country": country,
-                "year": year,
-                "barcode": barcode,
-                "format_details": format_details,
-            }
-        else:
-            return {"success": False, "error": "Could not identify record"}
+        result_dict = _parse_vision_response(text)
+        if result_dict.get("success"):
+            print(
+                f"  [identify] → artist={result_dict['artist']!r}"
+                f" title={result_dict['title']!r} label={result_dict['label']!r}"
+                f" cat={result_dict['catalog_number']!r}"
+                f" country={result_dict['country']!r} barcode={result_dict['barcode']!r}"
+            )
+        return result_dict
 
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="replace")

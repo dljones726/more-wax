@@ -799,5 +799,75 @@ class TestSchemaMigration(unittest.TestCase):
         self.assertEqual(saved["schema_version"], "1.1")
 
 
+class TestBuildDiff(unittest.TestCase):
+    """Direct tests for _build_diff — pure over in-memory lists, no DB."""
+
+    def test_exact_discogs_id_skipped(self):
+        from server.sync import _build_diff
+
+        local = [{"id": 1, "discogs_id": "100", "artist": "A", "title": "T"}]
+        discogs = [{"discogs_id": "100", "artist": "A", "title": "T"}]
+        self.assertEqual(_build_diff(discogs, local), [])
+
+    def test_master_id_flags_duplicate(self):
+        from server.sync import _build_diff
+
+        local = [
+            {
+                "id": 1,
+                "discogs_id": "100",
+                "master_id": "M1",
+                "artist": "A",
+                "title": "T",
+            }
+        ]
+        discogs = [
+            {"discogs_id": "999", "master_id": "M1", "artist": "A", "title": "T"}
+        ]
+        diff = _build_diff(discogs, local)
+        self.assertEqual(len(diff), 1)
+        self.assertTrue(diff[0]["_duplicate"])
+        self.assertEqual(diff[0]["_local_match"]["id"], 1)
+
+    def test_fuzzy_name_flags_duplicate(self):
+        from server.sync import _build_diff
+
+        local = [
+            {"id": 1, "discogs_id": "100", "artist": "Daft Punk", "title": "Homework"}
+        ]
+        discogs = [
+            {"discogs_id": "999", "artist": "  daft   punk ", "title": "HOMEWORK"}
+        ]
+        diff = _build_diff(discogs, local)
+        self.assertTrue(diff[0]["_duplicate"])
+
+    def test_new_record_not_duplicate(self):
+        from server.sync import _build_diff
+
+        local = [{"id": 1, "discogs_id": "100", "artist": "A", "title": "T"}]
+        discogs = [{"discogs_id": "999", "artist": "Brand New", "title": "Unseen"}]
+        diff = _build_diff(discogs, local)
+        self.assertEqual(len(diff), 1)
+        self.assertFalse(diff[0]["_duplicate"])
+
+    def test_master_id_zero_not_matched(self):
+        from server.sync import _build_diff
+
+        local = [
+            {
+                "id": 1,
+                "discogs_id": "100",
+                "master_id": "0",
+                "artist": "A",
+                "title": "T",
+            }
+        ]
+        discogs = [
+            {"discogs_id": "999", "master_id": "0", "artist": "Other", "title": "Song"}
+        ]
+        diff = _build_diff(discogs, local)
+        self.assertFalse(diff[0]["_duplicate"])
+
+
 if __name__ == "__main__":
     unittest.main()

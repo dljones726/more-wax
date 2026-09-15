@@ -350,6 +350,38 @@ def handle_login(handler):
     handler.end_headers()
 
 
+def _exchange_code(code: str, redirect_uri: str, code_verifier: str) -> dict:
+    """Exchange an OAuth authorization code for Google tokens.
+
+    Returns the parsed token response; raises URLError/JSONDecodeError on failure.
+    """
+    token_data = urllib.parse.urlencode(
+        {
+            "code": code,
+            "client_id": config.GOOGLE_CLIENT_ID,
+            "client_secret": config.GOOGLE_CLIENT_SECRET,
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code",
+            "code_verifier": code_verifier,
+        }
+    ).encode()
+    req = urllib.request.Request(GOOGLE_TOKEN_URL, data=token_data, method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
+        return json.loads(resp.read())
+
+
+def _fetch_userinfo(access_token: str) -> dict:
+    """Fetch the Google userinfo profile for an access token.
+
+    Returns the parsed profile; raises URLError/JSONDecodeError on failure.
+    """
+    req = urllib.request.Request(GOOGLE_USERINFO_URL)
+    req.add_header("Authorization", f"Bearer {access_token}")
+    with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
+        return json.loads(resp.read())
+
+
 def handle_callback(handler):
     """GET /auth/callback — Exchange code for token, create session."""
     # Rate limit
@@ -414,22 +446,8 @@ def handle_callback(handler):
         return
 
     # Exchange code for access token
-    token_data = urllib.parse.urlencode(
-        {
-            "code": code,
-            "client_id": config.GOOGLE_CLIENT_ID,
-            "client_secret": config.GOOGLE_CLIENT_SECRET,
-            "redirect_uri": redirect_uri,
-            "grant_type": "authorization_code",
-            "code_verifier": code_verifier,
-        }
-    ).encode()
-
     try:
-        req = urllib.request.Request(GOOGLE_TOKEN_URL, data=token_data, method="POST")
-        req.add_header("Content-Type", "application/x-www-form-urlencoded")
-        with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
-            tokens = json.loads(resp.read())
+        tokens = _exchange_code(code, redirect_uri, code_verifier)
     except (urllib.error.URLError, json.JSONDecodeError) as e:
         handler._send_html(500, _error_page("Token exchange failed", str(e)))
         return
@@ -444,10 +462,7 @@ def handle_callback(handler):
 
     # Get user info
     try:
-        req = urllib.request.Request(GOOGLE_USERINFO_URL)
-        req.add_header("Authorization", f"Bearer {access_token}")
-        with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
-            userinfo = json.loads(resp.read())
+        userinfo = _fetch_userinfo(access_token)
     except (urllib.error.URLError, json.JSONDecodeError) as e:
         handler._send_html(500, _error_page("Userinfo fetch failed", str(e)))
         return

@@ -222,5 +222,48 @@ class TestCodeFenceParsing(unittest.TestCase):
         self.assertFalse(result["success"])
 
 
+class TestParseVisionResponse(unittest.TestCase):
+    """Direct tests for the parsing helper — no HTTP mocking needed."""
+
+    def test_plain_json(self):
+        from server.images import _parse_vision_response
+
+        out = _parse_vision_response('{"artist": "DJ Shadow", "title": "Endtroducing"}')
+        self.assertTrue(out["success"])
+        self.assertEqual(out["artist"], "DJ Shadow")
+        self.assertEqual(out["title"], "Endtroducing")
+
+    def test_markdown_fence_stripped(self):
+        from server.images import _parse_vision_response
+
+        out = _parse_vision_response(
+            '```json\n{"artist": "UNKLE", "title": "Psyence"}\n```'
+        )
+        self.assertTrue(out["success"])
+        self.assertEqual(out["artist"], "UNKLE")
+
+    def test_empty_artist_and_title_is_failure(self):
+        from server.images import _parse_vision_response
+
+        out = _parse_vision_response('{"artist": "", "title": ""}')
+        self.assertFalse(out["success"])
+
+    def test_missing_fields_default_to_empty(self):
+        from server.images import _parse_vision_response
+
+        out = _parse_vision_response(
+            '{"artist": "Massive Attack", "title": "Mezzanine"}'
+        )
+        self.assertTrue(out["success"])
+        self.assertEqual(out["label"], "")
+        self.assertEqual(out["barcode"], "")
+
+    def test_invalid_json_raises(self):
+        from server.images import _parse_vision_response
+
+        with self.assertRaises(json.JSONDecodeError):
+            _parse_vision_response("not json at all")
+
+
 if __name__ == "__main__":
     unittest.main()

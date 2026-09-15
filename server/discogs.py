@@ -431,6 +431,36 @@ def discogs_fetch_identity():
         print(f"  ⚠️ [discogs] Could not fetch identity: {e}")
 
 
+def _map_collection_item(item: dict) -> dict | None:
+    """Project one Discogs collection entry to our lightweight record dict.
+
+    Returns None when the entry has no release id (skip it).
+    """
+    info = item.get("basic_information", {})
+    release_id = str(info.get("id", ""))
+    if not release_id:
+        return None
+
+    labels = info.get("labels") or []
+    formats = info.get("formats") or []
+    return {
+        "discogs_id": release_id,
+        "master_id": str(info.get("master_id", "") or ""),
+        "title": info.get("title", ""),
+        "artist": _format_artists(info.get("artists") or []),
+        "year": str(info.get("year", "")),
+        "label": ", ".join(lbl.get("name", "") for lbl in labels),
+        "catalog_number": ", ".join(
+            lbl.get("catno", "") for lbl in labels if lbl.get("catno")
+        ),
+        "format": ", ".join(f.get("name", "") for f in formats),
+        "genres": json.dumps(info.get("genres") or []),
+        "styles": json.dumps(info.get("styles") or []),
+        "cover_image_url": info.get("cover_image", ""),
+        "thumb": info.get("thumb", ""),
+    }
+
+
 def discogs_fetch_collection() -> list:
     """Fetch all releases from the user's Discogs collection.
 
@@ -453,34 +483,9 @@ def discogs_fetch_collection() -> list:
         )
 
         for item in data.get("releases", []):
-            info = item.get("basic_information", {})
-            release_id = str(info.get("id", ""))
-            if not release_id:
-                continue
-
-            artist_str = _format_artists(info.get("artists") or [])
-
-            labels = info.get("labels") or []
-            formats = info.get("formats") or []
-
-            results.append(
-                {
-                    "discogs_id": release_id,
-                    "master_id": str(info.get("master_id", "") or ""),
-                    "title": info.get("title", ""),
-                    "artist": artist_str,
-                    "year": str(info.get("year", "")),
-                    "label": ", ".join(lbl.get("name", "") for lbl in labels),
-                    "catalog_number": ", ".join(
-                        lbl.get("catno", "") for lbl in labels if lbl.get("catno")
-                    ),
-                    "format": ", ".join(f.get("name", "") for f in formats),
-                    "genres": json.dumps(info.get("genres") or []),
-                    "styles": json.dumps(info.get("styles") or []),
-                    "cover_image_url": info.get("cover_image", ""),
-                    "thumb": info.get("thumb", ""),
-                }
-            )
+            mapped = _map_collection_item(item)
+            if mapped:
+                results.append(mapped)
 
         pagination = data.get("pagination", {})
         total_pages = pagination.get("pages", 1)

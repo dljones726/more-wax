@@ -174,5 +174,38 @@ class TestDiscogsApiUrl(unittest.TestCase):
         self.assertTrue(DISCOGS_API.startswith("https://"))
 
 
+class TestMapCollectionItem(unittest.TestCase):
+    def test_maps_basic_information(self):
+        from server.discogs import _map_collection_item
+
+        item = {
+            "basic_information": {
+                "id": 123,
+                "master_id": 456,
+                "title": "Endtroducing",
+                "artists": [{"name": "DJ Shadow"}],
+                "year": 1996,
+                "labels": [{"name": "Mo Wax", "catno": "MW059LP"}],
+                "formats": [{"name": "Vinyl"}],
+                "genres": ["Electronic"],
+                "styles": ["Trip Hop"],
+                "cover_image": "http://img/cover.jpg",
+                "thumb": "http://img/thumb.jpg",
+            }
+        }
+        out = _map_collection_item(item)
+        self.assertEqual(out["discogs_id"], "123")
+        self.assertEqual(out["master_id"], "456")
+        self.assertEqual(out["artist"], "DJ Shadow")
+        self.assertEqual(out["catalog_number"], "MW059LP")
+        self.assertEqual(out["format"], "Vinyl")
+        self.assertEqual(out["genres"], '["Electronic"]')
+
+    def test_missing_id_returns_none(self):
+        from server.discogs import _map_collection_item
+
+        self.assertIsNone(_map_collection_item({"basic_information": {}}))
+
+
 if __name__ == "__main__":
     unittest.main()
