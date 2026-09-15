@@ -4,6 +4,7 @@ Loads environment variables from data/.env and defines all paths/constants.
 """
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent.parent
@@ -53,20 +54,50 @@ SUPPORTED_MODELS = [
 ]
 
 
+@dataclass(frozen=True)
+class Settings:
+    """Immutable snapshot of the runtime configuration.
+
+    Prefer ``config.settings.<field>`` in new code. The module-level globals
+    (``config.DISCOGS_TOKEN`` etc.) are kept as a compatibility shim, rebuilt
+    from this object on every load, so existing reads keep working.
+    """
+
+    anthropic_api_key: str = ""
+    vision_model: str = "claude-sonnet-4-6"
+    discogs_token: str = ""
+    format_filter: str = "Vinyl"  # Vinyl, CD, or All
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    allowed_emails: str = ""  # comma-separated; blank = first-login-locks
+
+
+# Current settings snapshot — reassigned on every _load_config().
+settings = Settings()
+
+
 def _load_config():
-    """(Re)load configuration from data/.env into module-level variables."""
+    """(Re)load configuration from data/.env into ``settings`` + legacy globals."""
     global ANTHROPIC_API_KEY, VISION_MODEL, DISCOGS_TOKEN, FORMAT_FILTER
-    global GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, ALLOWED_EMAILS
+    global GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, ALLOWED_EMAILS, settings
     _load_env_file(DATA_DIR / ".env")
-    ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-    VISION_MODEL = os.environ.get("VISION_MODEL", "claude-sonnet-4-6")
-    DISCOGS_TOKEN = os.environ.get("DISCOGS_TOKEN", "")
-    FORMAT_FILTER = os.environ.get("FORMAT_FILTER", "Vinyl")  # Vinyl, CD, or All
-    # Google OAuth (auth enabled when GOOGLE_CLIENT_ID is set)
-    GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
-    GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-    # Comma-separated list of allowed emails; blank = first-login-locks
-    ALLOWED_EMAILS = os.environ.get("ALLOWED_EMAILS", "")
+    settings = Settings(
+        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+        vision_model=os.environ.get("VISION_MODEL", "claude-sonnet-4-6"),
+        discogs_token=os.environ.get("DISCOGS_TOKEN", ""),
+        format_filter=os.environ.get("FORMAT_FILTER", "Vinyl"),
+        google_client_id=os.environ.get("GOOGLE_CLIENT_ID", ""),
+        google_client_secret=os.environ.get("GOOGLE_CLIENT_SECRET", ""),
+        allowed_emails=os.environ.get("ALLOWED_EMAILS", ""),
+    )
+    # Compatibility shim: mirror the snapshot into module-level globals.
+    ANTHROPIC_API_KEY = settings.anthropic_api_key
+    VISION_MODEL = settings.vision_model
+    DISCOGS_TOKEN = settings.discogs_token
+    FORMAT_FILTER = settings.format_filter
+    GOOGLE_CLIENT_ID = settings.google_client_id
+    GOOGLE_CLIENT_SECRET = settings.google_client_secret
+    ALLOWED_EMAILS = settings.allowed_emails
 
 
 def save_token(key: str, value: str):

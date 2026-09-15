@@ -205,6 +205,53 @@ class TestSaveToken(unittest.TestCase):
         os.environ.pop("KEY", None)
 
 
+class TestSettingsObject(unittest.TestCase):
+    def test_defaults(self):
+        from server.config import Settings
+
+        s = Settings()
+        self.assertEqual(s.discogs_token, "")
+        self.assertEqual(s.vision_model, "claude-sonnet-4-6")
+        self.assertEqual(s.format_filter, "Vinyl")
+
+    def test_is_frozen(self):
+        from dataclasses import FrozenInstanceError
+
+        from server.config import Settings
+
+        s = Settings()
+        with self.assertRaises(FrozenInstanceError):
+            s.discogs_token = "hacked"  # type: ignore[misc]
+
+    def test_shim_mirrors_settings(self):
+        """Legacy module globals must match the settings snapshot after load."""
+        import server.config as cfg
+
+        self.assertEqual(cfg.settings.discogs_token, cfg.DISCOGS_TOKEN)
+        self.assertEqual(cfg.settings.anthropic_api_key, cfg.ANTHROPIC_API_KEY)
+        self.assertEqual(cfg.settings.google_client_id, cfg.GOOGLE_CLIENT_ID)
+        self.assertEqual(cfg.settings.format_filter, cfg.FORMAT_FILTER)
+
+    def test_reload_updates_both(self):
+        """_load_config rebuilds the snapshot and the shim together."""
+        import os
+
+        import server.config as cfg
+
+        orig = os.environ.get("FORMAT_FILTER")
+        try:
+            os.environ["FORMAT_FILTER"] = "CD"
+            cfg._load_config()
+            self.assertEqual(cfg.settings.format_filter, "CD")
+            self.assertEqual(cfg.FORMAT_FILTER, "CD")
+        finally:
+            if orig is None:
+                os.environ.pop("FORMAT_FILTER", None)
+            else:
+                os.environ["FORMAT_FILTER"] = orig
+            cfg._load_config()
+
+
 class TestSupportedModels(unittest.TestCase):
     def test_supported_models_not_empty(self):
         from server.config import SUPPORTED_MODELS

@@ -62,23 +62,20 @@ def _mask(value: str) -> str:
 
 def settings_payload() -> dict:
     """Current settings with masked secrets — the shared GET/response body."""
-    dt = _config.DISCOGS_TOKEN
-    ak = _config.ANTHROPIC_API_KEY
-    gid = _config.GOOGLE_CLIENT_ID
-    gs = _config.GOOGLE_CLIENT_SECRET
+    s = _config.settings
     return {
-        "discogs_token_set": bool(dt),
-        "discogs_token_masked": _mask(dt),
-        "anthropic_key_set": bool(ak),
-        "anthropic_key_masked": _mask(ak),
-        "vision_model": _config.VISION_MODEL,
+        "discogs_token_set": bool(s.discogs_token),
+        "discogs_token_masked": _mask(s.discogs_token),
+        "anthropic_key_set": bool(s.anthropic_api_key),
+        "anthropic_key_masked": _mask(s.anthropic_api_key),
+        "vision_model": s.vision_model,
         "supported_models": _config.SUPPORTED_MODELS,
-        "format_filter": _config.FORMAT_FILTER,
-        "google_client_id_set": bool(gid),
-        "google_client_id_masked": _mask(gid),
-        "google_client_secret_set": bool(gs),
-        "google_client_secret_masked": _mask(gs),
-        "allowed_emails": _config.ALLOWED_EMAILS,
+        "format_filter": s.format_filter,
+        "google_client_id_set": bool(s.google_client_id),
+        "google_client_id_masked": _mask(s.google_client_id),
+        "google_client_secret_set": bool(s.google_client_secret),
+        "google_client_secret_masked": _mask(s.google_client_secret),
+        "allowed_emails": s.allowed_emails,
         "sync_missing_master_ids": count_missing_master_ids(),
     }
 
