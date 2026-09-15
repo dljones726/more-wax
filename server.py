@@ -10,11 +10,12 @@ import ssl
 import subprocess
 import threading
 
+from server.api.settings import check_anthropic_key
 from server.auth import start_cleanup_thread as _start_session_cleanup
 from server.backup import start_watcher as _start_backup_watcher
 from server.config import ANTHROPIC_API_KEY, DATA_DIR, DISCOGS_TOKEN
 from server.discogs import discogs_fetch_identity
-from server.handler import Handler, check_anthropic_key
+from server.handler import Handler
 
 
 def _generate_cert():

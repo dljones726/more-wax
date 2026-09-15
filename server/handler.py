@@ -1,6 +1,8 @@
 """
 More'Wax — HTTP Request Handler
-Routes all HTTP requests to the appropriate backend logic.
+Thin routing/transport layer. Request parsing, the auth gate, path-safety, and
+file/stream responses live here; per-endpoint business logic lives in
+``server.api.*`` as functions returning ``(status, payload)``.
 """
 
 from __future__ import annotations
@@ -9,84 +11,25 @@ import http.server
 import json
 import mimetypes
 import os
-import threading
-import time
 import urllib.error
 import urllib.parse
-import urllib.request as _urllib_request
+import urllib.request
 from pathlib import Path
 
 import server.auth as _auth
 import server.backup as _backup
 import server.config as _config
 import server.discogs as _discogs_mod
+from server.api import collection as _collection
+from server.api import discogs as _discogs_api
+from server.api import listens as _listens_api
+from server.api import media as _media
+from server.api import settings as _settings_api
+from server.api import sync as _sync_api
 from server.config import DATA_DIR, STATIC_DIR
-from server.database import (
-    _db_add_unlocked,
-    _lock,
-    db_delete,
-    db_export,
-    db_find_duplicate,
-    db_get,
-    db_list,
-    db_update,
-)
-from server.discogs import (
-    _discogs_request,
-    discogs_add_to_collection,
-    discogs_check_collection,
-    discogs_refresh_prices,
-    discogs_release_details,
-    discogs_release_full,
-    discogs_remove_from_collection,
-    discogs_search,
-)
-from server.images import convert_image, identify_cover, upload_cover
-from server.listens import (
-    listens_add,
-    listens_delete,
-    listens_delete_for_record,
-    listens_list,
-)
-from server.sync import sync_get_state, sync_start_fetch, sync_start_import
+from server.database import db_export
 
 MAX_BODY_BYTES = 20 * 1024 * 1024  # 20 MB cap on request bodies
-
-# None = not yet checked, True = valid, False = invalid
-_anthropic_key_valid = None
-
-
-def check_anthropic_key():
-    """Background check: validate the Anthropic key and cache the result."""
-    global _anthropic_key_valid
-    if not _config.ANTHROPIC_API_KEY:
-        _anthropic_key_valid = None
-        return
-    result = _validate_anthropic_key(_config.ANTHROPIC_API_KEY)
-    _anthropic_key_valid = result["valid"]
-    if result["valid"]:
-        print("  🤖 [anthropic] API key is valid")
-    else:
-        print(f"  ⚠️ [anthropic] API key invalid: {result.get('error', '')}")
-
-
-def _validate_anthropic_key(key: str) -> dict:
-    """Validate an Anthropic API key by listing models (free, no tokens used)."""
-    req = _urllib_request.Request(
-        "https://api.anthropic.com/v1/models",
-        method="GET",
-        headers={
-            "x-api-key": key,
-            "anthropic-version": "2023-06-01",
-        },
-    )
-    try:
-        with _urllib_request.urlopen(req, timeout=10):  # nosec B310
-            return {"valid": True}
-    except urllib.error.HTTPError as e:
-        return {"valid": False, "error": f"Anthropic returned {e.code}"}
-    except Exception as e:
-        return {"valid": False, "error": str(e)}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -203,6 +146,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def path_parts(self):
         return urllib.parse.urlparse(self.path).path.rstrip("/") or "/"
 
+    def _query(self) -> dict:
+        """Parsed query string as {key: [values]}."""
+        return urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+
     # ── routing ──────────────────────────────────────────────────
 
     def do_OPTIONS(self):
@@ -247,60 +194,45 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_file(STATIC_DIR / "index.html")
         elif p.startswith("/static/"):
             f = self._safe_resolve("static", p[8:])
-            if f:
-                self.send_file(f)
-            else:
-                self._404()
+            self.send_file(f) if f else self._404()
         elif p.startswith("/covers/"):
             f = self._safe_resolve("data", p[1:])
-            if f:
-                self.send_file(f)
-            else:
-                self._404()
+            self.send_file(f) if f else self._404()
         elif p.startswith("/api/cover-proxy"):
             self._api_cover_proxy()
         elif p == "/api/status":
-            from server.version import BUILD_DATE, GIT_REVISION, VERSION
-
-            self.send_json(
-                {
-                    "discogs_connected": _discogs_mod._discogs_username is not None,
-                    "discogs_username": _discogs_mod._discogs_username,
-                    "discogs_token_set": bool(_config.DISCOGS_TOKEN),
-                    "anthropic_key_set": bool(_config.ANTHROPIC_API_KEY),
-                    "anthropic_key_valid": _anthropic_key_valid,
-                    "vision_model": _config.VISION_MODEL,
-                    "format_filter": _config.FORMAT_FILTER,
-                    "version": VERSION,
-                    "build_date": BUILD_DATE,
-                    "git_revision": GIT_REVISION,
-                }
-            )
+            self._api_status()
         elif p == "/api/collection":
-            self.send_json(db_list())
+            self._respond(_collection.handle_list())
         elif p.startswith("/api/collection/") and p.endswith("/details"):
-            self._api_collection_details(p)
+            self._respond(
+                _collection.handle_details(self._tail_id(p[: -len("/details")]))
+            )
         elif p.startswith("/api/collection/"):
-            rid = self._tail_id(p)
-            rec = db_get(rid)
-            self.send_json(rec) if rec else self.send_json({"error": "Not found"}, 404)
+            self._respond(_collection.handle_get(self._tail_id(p)))
         elif p == "/api/settings":
-            self._api_get_settings()
+            self._respond(_settings_api.handle_get_settings())
         elif p == "/api/export":
             self._api_export()
         elif p == "/api/sync/status":
-            self._api_sync_status()
+            self._respond(_sync_api.handle_status())
         elif p == "/api/discogs/search":
-            self._api_discogs_search()
+            q = self._query()
+            self._respond(
+                _discogs_api.handle_search(
+                    q.get("q", [""])[0], q.get("barcode", [""])[0]
+                )
+            )
         elif p.startswith("/api/discogs/release/"):
-            self._api_discogs_release(p.split("/")[-1])
+            self._respond(_discogs_api.handle_release(p.split("/")[-1]))
         elif p.startswith("/api/discogs/prices/"):
-            self._api_discogs_prices(p.split("/")[-1])
+            self._respond(_discogs_api.handle_prices(p.split("/")[-1]))
         elif p.startswith("/api/discogs/in-collection/"):
-            rid = p.split("/")[-1]
-            self.send_json({"in_collection": discogs_check_collection(rid)})
+            self._respond(_discogs_api.handle_in_collection(p.split("/")[-1]))
         elif p == "/api/listens":
-            self._api_listens_list()
+            self._respond(
+                _listens_api.handle_list(self._query().get("record_id", [None])[0])
+            )
         elif p == "/api/backup/status":
             self.send_json(_backup.backup_status())
         else:
@@ -311,34 +243,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         p = self.path_parts()
         if p == "/api/setup":
-            self._api_setup()
+            self._respond(_settings_api.handle_setup(self.read_json()))
         elif p == "/api/setup/validate":
-            self._api_setup_validate()
+            self._respond(_settings_api.handle_setup_validate(self.read_json()))
         elif p == "/api/settings":
-            self._api_update_settings()
+            self._respond(
+                _settings_api.handle_update_settings(
+                    self.read_json(), self._settings_redirect_uri()
+                )
+            )
         elif p == "/api/collection":
-            self._api_add()
+            self._respond(_collection.handle_add(self.read_json()))
         elif p == "/api/upload-cover":
-            self._api_upload_cover()
+            self._respond(_media.handle_upload_cover(self.read_json()))
         elif p == "/api/convert-image":
-            self._api_convert_image()
+            self._respond(_media.handle_convert_image(self.read_json()))
         elif p == "/api/identify-cover":
-            self._api_identify_cover()
+            self._respond(_media.handle_identify_cover(self.read_json()))
         elif p.startswith("/api/discogs/add-to-collection/"):
-            rid = p.split("/")[-1]
-            ok = discogs_add_to_collection(rid)
-            if ok:
-                # Backfill master_id if the local record is missing it
-                self._backfill_master_id(rid)
-            self.send_json({"success": ok})
+            self._respond(_collection.handle_add_to_collection(p.split("/")[-1]))
         elif p == "/api/collection/refresh-prices":
-            self._api_refresh_all_prices()
+            self._respond(
+                _collection.handle_refresh_all_prices("force" in self._query())
+            )
         elif p == "/api/sync/fetch":
-            self._api_sync_fetch()
+            self._respond(_sync_api.handle_fetch())
         elif p == "/api/sync/import":
-            self._api_sync_import()
+            self._respond(_sync_api.handle_import(self.read_json()))
         elif p == "/api/listens":
-            self._api_listens_add()
+            self._respond(_listens_api.handle_add(self.read_json()))
         elif p == "/api/backup/now":
             result = _backup.backup_now()
             self.send_json(result, 200 if result.get("success") else 502)
@@ -353,7 +286,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         p = self.path_parts()
         if p.startswith("/api/collection/"):
-            self._api_update(self._tail_id(p))
+            self._respond(_collection.handle_update(self._tail_id(p), self.read_json()))
         else:
             self._404()
 
@@ -362,36 +295,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         p = self.path_parts()
         if p.startswith("/api/discogs/collection/"):
-            rid = p.split("/")[-1]
-            ok = discogs_remove_from_collection(rid)
-            self.send_json({"success": ok})
+            self._respond(_discogs_api.handle_remove_from_collection(p.split("/")[-1]))
         elif p.startswith("/api/collection/"):
-            rid = self._tail_id(p)
-            ok = db_delete(rid)
-            if ok:
-                listens_delete_for_record(rid)
-            self.send_json({"success": ok})
+            self._respond(_collection.handle_delete(self._tail_id(p)))
         elif p.startswith("/api/listens/"):
-            ok = listens_delete(self._tail_id(p))
-            self.send_json({"success": ok})
+            self._respond(_listens_api.handle_delete(self._tail_id(p)))
         else:
             self._404()
 
-    def _backfill_master_id(self, discogs_id: str):
-        """Fetch and save master_id for a local record if missing."""
-        records = db_list()
-        rec = next(
-            (r for r in records if str(r.get("discogs_id", "")) == discogs_id),
-            None,
-        )
-        if not rec or rec.get("master_id"):
-            return  # already has master_id or not in local DB
-        try:
-            release = _discogs_request("GET", f"/releases/{discogs_id}")
-            mid = str(release.get("master_id", "") or "0")
-            db_update(rec["id"], {"master_id": mid})
-        except Exception:
-            pass  # non-critical, will be retried on next startup
+    def _respond(self, result):
+        """Serialise an (status, payload) tuple from an api.* handler."""
+        status, payload = result
+        self.send_json(payload, status)
 
     def _404(self):
         self.send_response(404)
@@ -437,9 +352,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 pass
         # IPv6 private ranges
         ip_lower = ip.lower().strip("[]")
-        if ip_lower.startswith("fc") or ip_lower.startswith(
-            "fd"
-        ):  # Unique Local (fc00::/7)
+        if ip_lower.startswith("fc") or ip_lower.startswith("fd"):  # Unique Local
             return True
         if ip_lower.startswith("fe80"):  # Link-Local (fe80::/10)
             return True
@@ -494,246 +407,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except ValueError:
             return -1
 
-    # ── setup endpoint ─────────────────────────────────────────────
-
-    def _api_setup(self):
-        data = self.read_json()
-        discogs_token = data.get("discogs_token", "").strip()
-        anthropic_key = data.get("anthropic_api_key", "").strip()
-
-        # Validate Discogs token if provided
-        if discogs_token:
-            result = _discogs_mod.discogs_validate_token(discogs_token)
-            if not result["valid"]:
-                self.send_json({"success": False, "error": result["error"]}, 400)
-                return
-            _config.save_token("DISCOGS_TOKEN", discogs_token)
-            # Start identity fetch in background
-            _discogs_mod._discogs_username = result["username"]
-
-        # Save Anthropic key if provided
-        if anthropic_key:
-            global _anthropic_key_valid
-            _config.save_token("ANTHROPIC_API_KEY", anthropic_key)
-            _anthropic_key_valid = True  # validated inline already
-
-        self.send_json(
-            {
-                "success": True,
-                "discogs_connected": _discogs_mod._discogs_username is not None,
-                "discogs_username": _discogs_mod._discogs_username,
-                "discogs_token_set": bool(_config.DISCOGS_TOKEN),
-                "anthropic_key_set": bool(_config.ANTHROPIC_API_KEY),
-            }
-        )
-
-    def _api_setup_validate(self):
-        data = self.read_json()
-        discogs_token = data.get("discogs_token", "").strip()
-        anthropic_key = data.get("anthropic_api_key", "").strip()
-
-        if discogs_token:
-            result = _discogs_mod.discogs_validate_token(discogs_token)
-            self.send_json(result)
-            return
-
-        if anthropic_key:
-            result = _validate_anthropic_key(anthropic_key)
-            self.send_json(result)
-            return
-
-        self.send_json({"valid": False, "error": "No token provided"}, 400)
-
-    # ── settings endpoints ────────────────────────────────────────
-
-    def _count_missing_master_ids(self) -> int:
-        """Count records with discogs_id but no master_id."""
-        records = db_list()
-        return sum(1 for r in records if r.get("discogs_id") and not r.get("master_id"))
-
-    def _api_get_settings(self):
-        """Return current settings with masked tokens."""
-        dt = _config.DISCOGS_TOKEN
-        ak = _config.ANTHROPIC_API_KEY
-        gid = _config.GOOGLE_CLIENT_ID
-        gs = _config.GOOGLE_CLIENT_SECRET
-        self.send_json(
-            {
-                "discogs_token_set": bool(dt),
-                "discogs_token_masked": f"••••{dt[-4:]}" if len(dt) > 4 else "",
-                "anthropic_key_set": bool(ak),
-                "anthropic_key_masked": f"••••{ak[-4:]}" if len(ak) > 4 else "",
-                "vision_model": _config.VISION_MODEL,
-                "supported_models": _config.SUPPORTED_MODELS,
-                "format_filter": _config.FORMAT_FILTER,
-                "google_client_id_set": bool(gid),
-                "google_client_id_masked": f"••••{gid[-4:]}" if len(gid) > 4 else "",
-                "google_client_secret_set": bool(gs),
-                "google_client_secret_masked": f"••••{gs[-4:]}" if len(gs) > 4 else "",
-                "allowed_emails": _config.ALLOWED_EMAILS,
-                "sync_missing_master_ids": self._count_missing_master_ids(),
-            }
-        )
-
-    def _api_update_settings(self):
-        """Update individual settings."""
-        data = self.read_json()
-        global _anthropic_key_valid
-
-        # Token updates (reuse setup validation)
-        discogs_token = data.get("discogs_token", "").strip()
-        if discogs_token:
-            result = _discogs_mod.discogs_validate_token(discogs_token)
-            if not result["valid"]:
-                self.send_json({"success": False, "error": result["error"]}, 400)
-                return
-            _config.save_token("DISCOGS_TOKEN", discogs_token)
-            _discogs_mod._discogs_username = result["username"]
-
-        anthropic_key = data.get("anthropic_api_key", "").strip()
-        if anthropic_key:
-            result = _validate_anthropic_key(anthropic_key)
-            if not result["valid"]:
-                self.send_json({"success": False, "error": result["error"]}, 400)
-                return
-            _config.save_token("ANTHROPIC_API_KEY", anthropic_key)
-            _anthropic_key_valid = True
-
-        # Non-token settings
-        if "vision_model" in data:
-            model = data["vision_model"].strip()
-            if model in _config.SUPPORTED_MODELS:
-                _config.save_token("VISION_MODEL", model)
-
-        if "format_filter" in data:
-            fmt = data["format_filter"].strip()
-            if fmt in ("Vinyl", "CD", "All"):
-                _config.save_token("FORMAT_FILTER", fmt)
-
-        # Clear Google OAuth
-        if data.get("clear_google_auth"):
-            _config.save_token("GOOGLE_CLIENT_ID", "")
-            _config.save_token("GOOGLE_CLIENT_SECRET", "")
-            _config.save_token("ALLOWED_EMAILS", "")
-            from server.auth import clear_all_sessions
-
-            clear_all_sessions()
-            self._api_get_settings()
-            return
-
-        # Google OAuth settings — validate before saving
-        google_id = data.get("google_client_id", "").strip()
-        google_secret = data.get("google_client_secret", "").strip()
-
-        # Validate Client ID format immediately
-        if google_id:
-            if not google_id.endswith(".apps.googleusercontent.com"):
-                self.send_json(
-                    {
-                        "success": False,
-                        "error": "Invalid Client ID — must end with .apps.googleusercontent.com",
-                    },
-                    400,
-                )
-                return
-            _config.save_token("GOOGLE_CLIENT_ID", google_id)
-
-        if google_secret:
-            _config.save_token("GOOGLE_CLIENT_SECRET", google_secret)
-
-        # If both are now set, validate the full credentials against Google
-        if (
-            (google_id or google_secret)
-            and _config.GOOGLE_CLIENT_ID
-            and _config.GOOGLE_CLIENT_SECRET
-        ):
-            validation = self._validate_google_oauth()
-            if not validation["valid"]:
-                # Roll back — clear the credential that was just saved
-                if google_id:
-                    _config.save_token("GOOGLE_CLIENT_ID", "")
-                if google_secret:
-                    _config.save_token("GOOGLE_CLIENT_SECRET", "")
-                self.send_json({"success": False, "error": validation["error"]}, 400)
-                return
-
-        if "allowed_emails" in data:
-            _config.save_token("ALLOWED_EMAILS", data["allowed_emails"].strip())
-            # Invalidate all sessions when allowed emails change
-            from server.auth import clear_all_sessions
-
-            clear_all_sessions()
-
-        self._api_get_settings()
-
-    def _validate_google_oauth(self):
-        """Validate Google OAuth credentials by making a test token request.
-
-        Returns {"valid": True} or {"valid": False, "error": "..."}.
-        A valid client_id/secret will return 'invalid_grant' (no real code).
-        An invalid client will return 'invalid_client'.
-        """
-        import urllib.error
-        import urllib.parse
-        import urllib.request
-
-        # Build redirect URI from the current request's host
+    def _settings_redirect_uri(self) -> str:
+        """Build the OAuth redirect URI for the Google credential probe."""
         host = (
             self.headers.get("X-Forwarded-Host")
             or self.headers.get("Host")
             or "localhost"
         )
         proto = self.headers.get("X-Forwarded-Proto", "http")
-        redirect_uri = f"{proto}://{host}/auth/callback"
+        return f"{proto}://{host}/auth/callback"
 
-        params = urllib.parse.urlencode(
+    # ── status ─────────────────────────────────────────────────────
+
+    def _api_status(self):
+        from server.version import BUILD_DATE, GIT_REVISION, VERSION
+
+        self.send_json(
             {
-                "code": "test_validation_code",
-                "client_id": _config.GOOGLE_CLIENT_ID,
-                "client_secret": _config.GOOGLE_CLIENT_SECRET,
-                "redirect_uri": redirect_uri,
-                "grant_type": "authorization_code",
+                "discogs_connected": _discogs_mod._discogs_username is not None,
+                "discogs_username": _discogs_mod._discogs_username,
+                "discogs_token_set": bool(_config.DISCOGS_TOKEN),
+                "anthropic_key_set": bool(_config.ANTHROPIC_API_KEY),
+                "anthropic_key_valid": _settings_api.anthropic_key_valid(),
+                "vision_model": _config.VISION_MODEL,
+                "format_filter": _config.FORMAT_FILTER,
+                "version": VERSION,
+                "build_date": BUILD_DATE,
+                "git_revision": GIT_REVISION,
             }
-        ).encode()
+        )
 
-        try:
-            req = urllib.request.Request(
-                "https://oauth2.googleapis.com/token",
-                data=params,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-            )
-            urllib.request.urlopen(req, timeout=10)  # nosec B310
-            # Shouldn't succeed with a fake code, but if it does, credentials are valid
-            return {"valid": True}
-        except urllib.error.HTTPError as e:
-            try:
-                body = json.loads(e.read())
-            except Exception:
-                return {"valid": False, "error": f"Google returned {e.code}"}
-
-            error_code = body.get("error", "")
-            error_desc = body.get("error_description", "")
-
-            if error_code == "invalid_grant":
-                # Client ID and secret are valid — the fake code was rejected
-                return {"valid": True}
-            elif error_code == "invalid_client":
-                return {
-                    "valid": False,
-                    "error": "Invalid Google Client ID or Secret",
-                }
-            elif error_code == "redirect_uri_mismatch":
-                return {
-                    "valid": False,
-                    "error": f"Redirect URI mismatch. Register {redirect_uri} in Google Cloud Console.",
-                }
-            else:
-                return {
-                    "valid": False,
-                    "error": error_desc or f"Google error: {error_code}",
-                }
-        except Exception as e:
-            return {"valid": False, "error": f"Could not reach Google: {e}"}
+    # ── export (streaming download) ────────────────────────────────
 
     def _api_export(self):
         """Export the collection as a downloadable JSON file."""
@@ -757,271 +461,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    # ── listens endpoints ────────────────────────────────────────
-
-    def _api_listens_list(self):
-        """Return listens, newest first. Optional ?record_id=N filter."""
-        qs = urllib.parse.urlparse(self.path).query
-        params = urllib.parse.parse_qs(qs)
-        rid_param = params.get("record_id", [None])[0]
-        record_id = None
-        if rid_param is not None:
-            try:
-                record_id = int(rid_param)
-            except ValueError:
-                self.send_json({"error": "record_id must be an integer"}, 400)
-                return
-        self.send_json(listens_list(record_id))
-
-    def _api_listens_add(self):
-        """Log a listen for a record. Body: {record_id: int}."""
-        data = self.read_json()
-        try:
-            record_id = int(data.get("record_id"))
-        except (TypeError, ValueError):
-            self.send_json({"error": "record_id is required"}, 400)
-            return
-        if db_get(record_id) is None:
-            self.send_json({"error": "Record not found"}, 404)
-            return
-        self.send_json(listens_add(record_id), 201)
-
-    # ── sync endpoints ────────────────────────────────────────────
-
-    def _api_sync_status(self):
-        """Return current sync state."""
-        self.send_json(sync_get_state())
-
-    def _api_sync_fetch(self):
-        """Fetch Discogs collection and return diff."""
-        result = sync_start_fetch()
-        if "error" in result:
-            self.send_json(result, 400 if result.get("status") != "error" else 500)
-        else:
-            self.send_json(result)
-
-    def _api_sync_import(self):
-        """Start importing selected records in a background thread."""
-        data = self.read_json()
-        selected = data.get("selected", [])
-        replace_ids = data.get("replace", [])
-        if not isinstance(selected, list) or not selected:
-            self.send_json({"error": "No records selected"}, 400)
-            return
-        if not isinstance(replace_ids, list):
-            replace_ids = []
-
-        def _run():
-            sync_start_import(selected, replace_ids)
-
-        t = threading.Thread(target=_run, daemon=True)
-        t.start()
-        self.send_json({"status": "importing", "total": len(selected)})
-
-    # ── collection endpoints ─────────────────────────────────────
-
-    def _api_add(self):
-        data = self.read_json()
-        allowed = (
-            "discogs_id",
-            "master_id",
-            "title",
-            "artist",
-            "year",
-            "label",
-            "catalog_number",
-            "format",
-            "genres",
-            "styles",
-            "country",
-            "notes",
-            "cover_image_url",
-            "local_cover",
-            "barcode",
-            "price_low",
-            "price_median",
-            "price_high",
-            "price_currency",
-            "num_for_sale",
-            "rating_average",
-            "rating_count",
-            "add_source",
-        )
-        record = {k: data[k] for k in allowed if k in data}
-        record.setdefault("title", "")
-        record.setdefault("artist", "")
-
-        with _lock:
-            dup = db_find_duplicate(record)
-            if dup:
-                self.send_json({"duplicate": True, "existing": dup}, 409)
-                return
-            new_id = _db_add_unlocked(record)
-
-        self.send_json({"id": new_id, "success": True}, 201)
-
-    def _api_update(self, rid: int):
-        data = self.read_json()
-        allowed = (
-            "title",
-            "artist",
-            "year",
-            "label",
-            "notes",
-            "local_cover",
-            "cover_image_url",
-            "price_low",
-            "price_median",
-            "price_high",
-            "price_currency",
-            "num_for_sale",
-            "rating_average",
-            "rating_count",
-            "liked_tracks",
-        )
-        fields = {k: data[k] for k in allowed if k in data}
-        ok = db_update(rid, fields)
-        self.send_json({"success": ok})
-
-    def _api_collection_details(self, path: str):
-        """Return cached Discogs extra details, fetching on first request."""
-        # /api/collection/5/details → 5
-        parts = path.strip("/").split("/")
-        try:
-            rid = int(parts[2])
-        except (IndexError, ValueError):
-            self.send_json({"error": "Invalid ID"}, 400)
-            return
-
-        rec = db_get(rid)
-        if not rec:
-            self.send_json({"error": "Not found"}, 404)
-            return
-
-        discogs_id = rec.get("discogs_id")
-        if not discogs_id:
-            self.send_json({"error": "No Discogs ID"}, 400)
-            return
-
-        # Return from cache if available
-        if rec.get("discogs_extra"):
-            self.send_json(rec["discogs_extra"])
-            return
-
-        # Fetch from Discogs and cache
-        try:
-            extra = discogs_release_details(str(discogs_id))
-            db_update(rid, {"discogs_extra": extra})
-            self.send_json(extra)
-        except Exception as e:
-            self._send_discogs_error(e)
-
-    # ── Discogs endpoints ────────────────────────────────────────
-
-    def _send_discogs_error(self, e: Exception):
-        """Unified error response for Discogs API failures."""
-        if isinstance(e, urllib.error.HTTPError):
-            self.send_json(
-                {"error": f"Discogs {e.code}"}, e.code if e.code < 500 else 502
-            )
-        else:
-            self.send_json({"error": str(e)}, 502)
-
-    def _api_discogs_search(self):
-        qs = urllib.parse.urlparse(self.path).query
-        params = urllib.parse.parse_qs(qs)
-        q = params.get("q", [""])[0]
-        barcode = params.get("barcode", [""])[0]
-        if not q and not barcode:
-            self.send_json({"results": [], "error": "No search query provided"}, 400)
-            return
-        try:
-            results = discogs_search(
-                q=q, barcode=barcode, format_filter=_config.FORMAT_FILTER
-            )
-            self.send_json({"results": results})
-        except Exception as e:
-            self._send_discogs_error(e)
-
-    def _api_discogs_release(self, release_id: str):
-        if not release_id or not release_id.isdigit():
-            self.send_json({"error": "Invalid release ID"}, 400)
-            return
-        try:
-            data = discogs_release_full(release_id)
-            self.send_json(data)
-        except Exception as e:
-            self._send_discogs_error(e)
-
-    def _api_discogs_prices(self, release_id: str):
-        try:
-            prices = discogs_refresh_prices(release_id)
-            self.send_json(prices)
-        except Exception as e:
-            self._send_discogs_error(e)
-
-    def _api_refresh_all_prices(self):
-        """Refresh prices for all (or stale) records. Runs in background thread."""
-        qs = urllib.parse.urlparse(self.path).query
-        force = "force" in urllib.parse.parse_qs(qs)
-        records = db_list()
-        stale = [
-            r
-            for r in records
-            if r.get("discogs_id")
-            and (
-                force
-                or not r.get("price_median")
-                or not r.get("price_high")
-                or not r.get("rating_average")
-            )
-        ]
-
-        if not stale:
-            self.send_json({"updated": 0, "total_stale": 0})
-            return
-
-        def _do_refresh():
-            updated = 0
-            for r in stale:
-                did = r.get("discogs_id")
-                rid = r.get("id")
-                if not did or not rid:
-                    print(f"  ⚠️ [prices] Skipping record missing discogs_id or id: {r}")
-                    continue
-                try:
-                    needs_rating = not r.get("rating_average")
-                    prices = discogs_refresh_prices(did, fetch_rating=needs_rating)
-                    if any(
-                        prices.get(k)
-                        for k in (
-                            "price_low",
-                            "price_median",
-                            "price_high",
-                            "rating_average",
-                        )
-                    ):
-                        db_update(rid, prices)
-                        updated += 1
-                except Exception as e:
-                    if "429" in str(e):
-                        print(f"  ⚠️ Rate limit hit after {updated} updates, stopping")
-                        break
-                # 5s between records — leaves ~50% rate budget for user browsing
-                time.sleep(5)
-            print(f"  📊 Background price refresh done: {updated}/{len(stale)} updated")
-
-        t = threading.Thread(target=_do_refresh, daemon=True)
-        t.start()
-        self.send_json({"updated": "pending", "total_stale": len(stale)})
-
     # ── cover proxy (for share card CORS) ──────────────────────
 
     def _api_cover_proxy(self):
         """Proxy a Discogs cover image to avoid CORS issues for canvas rendering."""
-        qs = urllib.parse.urlparse(self.path).query
-        params = urllib.parse.parse_qs(qs)
-        raw_url = params.get("url", [""])[0]
+        raw_url = self._query().get("url", [""])[0]
         # Parse and reconstruct URL to prevent SSRF — only allow i.discogs.com
         parsed = urllib.parse.urlparse(raw_url)
         if parsed.scheme != "https" or parsed.hostname != "i.discogs.com":
@@ -1048,26 +492,3 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(data)
         except Exception:
             self._404()
-
-    # ── media endpoints ──────────────────────────────────────────
-
-    def _api_upload_cover(self):
-        data = self.read_json()
-        result = upload_cover(data.get("image", ""), data.get("record_id", "tmp"))
-        self.send_json(result)
-
-    def _api_convert_image(self):
-        data = self.read_json()
-        result = convert_image(data.get("image", ""))
-        status = 200 if result.get("success") else 500
-        self.send_json(result, status)
-
-    def _api_identify_cover(self):
-        data = self.read_json()
-        result = identify_cover(data.get("image", ""))
-        status = (
-            200
-            if result.get("success")
-            else (501 if "not configured" in result.get("error", "") else 200)
-        )
-        self.send_json(result, status)
