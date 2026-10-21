@@ -112,7 +112,7 @@ New records are automatically added to your Discogs collection (folder 1). If al
 
 ### Cover photos
 
-Cover images come from Discogs by default. Users can take or upload a custom cover photo. HEIC files (from iPhone) are converted to JPEG using a fallback chain: `sips` (macOS) → `heic2any` (browser) → native decoder.
+Cover images come from Discogs by default. Users can take or upload a custom cover photo. HEIC files (from iPhone) are converted to JPEG in the browser via `heic2any`, with a server-side fallback chain of `sips` (macOS) → `convert` (ImageMagick) → `ffmpeg`.
 
 ### Error handling
 
@@ -134,7 +134,8 @@ External tools (optional, for HEIC conversion): `sips` (macOS built-in), `conver
 
 Loaded from CDN, no build step:
 
-- Bootstrap 5.3.2 (CSS + JS)
+- Tailwind CSS (Play CDN) — utility-first styling
+- Google Fonts — Noto Serif + Manrope
 - Bootstrap Icons 1.11.3
 - Quagga.js 0.12.1 (barcode scanning)
 - heic2any 0.0.4 (HEIC conversion fallback)
