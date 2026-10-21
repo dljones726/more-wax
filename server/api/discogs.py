@@ -39,7 +39,7 @@ def backfill_master_id(discogs_id: str):
         pass  # non-critical, will be retried on next startup
 
 
-def handle_search(q: str, barcode: str):
+def search(q: str, barcode: str):
     if not q and not barcode:
         return 400, {"results": [], "error": "No search query provided"}
     try:
@@ -54,7 +54,7 @@ def handle_search(q: str, barcode: str):
         return discogs_error(e)
 
 
-def handle_release(release_id: str):
+def release(release_id: str):
     if not release_id or not release_id.isdigit():
         return 400, {"error": "Invalid release ID"}
     try:
@@ -63,16 +63,16 @@ def handle_release(release_id: str):
         return discogs_error(e)
 
 
-def handle_prices(release_id: str):
+def prices(release_id: str):
     try:
         return 200, discogs_refresh_prices(release_id)
     except Exception as e:
         return discogs_error(e)
 
 
-def handle_in_collection(release_id: str):
+def in_collection(release_id: str):
     return 200, {"in_collection": discogs_check_collection(release_id)}
 
 
-def handle_remove_from_collection(release_id: str):
+def remove_from_collection(release_id: str):
     return 200, {"success": discogs_remove_from_collection(release_id)}

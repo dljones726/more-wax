@@ -485,49 +485,49 @@ _ROUTES = [
     # ── GET: JSON / streams ──
     _R("GET", "/api/cover-proxy", lambda h, _: h._api_cover_proxy()),
     _R("GET", "/api/status", lambda h, _: h._api_status()),
-    _R("GET", "/api/collection", lambda h, _: h._respond(_collection.handle_list())),
+    _R("GET", "/api/collection", lambda h, _: h._respond(_collection.list())),
     _R(
         "GET",
         "/api/collection/{id}/details",
-        lambda h, prm: h._respond(_collection.handle_details(_to_int(prm["id"]))),
+        lambda h, prm: h._respond(_collection.details(_to_int(prm["id"]))),
     ),
     _R(
         "GET",
         "/api/collection/{id}",
-        lambda h, prm: h._respond(_collection.handle_get(_to_int(prm["id"]))),
+        lambda h, prm: h._respond(_collection.get(_to_int(prm["id"]))),
     ),
     _R(
         "GET",
         "/api/settings",
-        lambda h, _: h._respond(_settings_api.handle_get_settings()),
+        lambda h, _: h._respond(_settings_api.get_settings()),
     ),
     _R("GET", "/api/export", lambda h, _: h._api_export()),
-    _R("GET", "/api/sync/status", lambda h, _: h._respond(_sync_api.handle_status())),
+    _R("GET", "/api/sync/status", lambda h, _: h._respond(_sync_api.status())),
     _R(
         "GET",
         "/api/discogs/search",
-        lambda h, _: h._respond(_discogs_api.handle_search(*_search_args(h))),
+        lambda h, _: h._respond(_discogs_api.search(*_search_args(h))),
     ),
     _R(
         "GET",
         "/api/discogs/release/{id}",
-        lambda h, prm: h._respond(_discogs_api.handle_release(prm["id"])),
+        lambda h, prm: h._respond(_discogs_api.release(prm["id"])),
     ),
     _R(
         "GET",
         "/api/discogs/prices/{id}",
-        lambda h, prm: h._respond(_discogs_api.handle_prices(prm["id"])),
+        lambda h, prm: h._respond(_discogs_api.prices(prm["id"])),
     ),
     _R(
         "GET",
         "/api/discogs/in-collection/{id}",
-        lambda h, prm: h._respond(_discogs_api.handle_in_collection(prm["id"])),
+        lambda h, prm: h._respond(_discogs_api.in_collection(prm["id"])),
     ),
     _R(
         "GET",
         "/api/listens",
         lambda h, _: h._respond(
-            _listens_api.handle_list(h._query().get("record_id", [None])[0])
+            _listens_api.list(h._query().get("record_id", [None])[0])
         ),
     ),
     _R("GET", "/api/backup/status", lambda h, _: h.send_json(_backup.backup_status())),
@@ -535,64 +535,60 @@ _ROUTES = [
     _R(
         "POST",
         "/api/setup",
-        lambda h, _: h._respond(_settings_api.handle_setup(h.read_json())),
+        lambda h, _: h._respond(_settings_api.setup(h.read_json())),
     ),
     _R(
         "POST",
         "/api/setup/validate",
-        lambda h, _: h._respond(_settings_api.handle_setup_validate(h.read_json())),
+        lambda h, _: h._respond(_settings_api.setup_validate(h.read_json())),
     ),
     _R(
         "POST",
         "/api/settings",
         lambda h, _: h._respond(
-            _settings_api.handle_update_settings(
-                h.read_json(), h._settings_redirect_uri()
-            )
+            _settings_api.update_settings(h.read_json(), h._settings_redirect_uri())
         ),
     ),
     _R(
         "POST",
         "/api/collection",
-        lambda h, _: h._respond(_collection.handle_add(h.read_json())),
+        lambda h, _: h._respond(_collection.add(h.read_json())),
     ),
     _R(
         "POST",
         "/api/upload-cover",
-        lambda h, _: h._respond(_media.handle_upload_cover(h.read_json())),
+        lambda h, _: h._respond(_media.upload_cover(h.read_json())),
     ),
     _R(
         "POST",
         "/api/convert-image",
-        lambda h, _: h._respond(_media.handle_convert_image(h.read_json())),
+        lambda h, _: h._respond(_media.convert_image(h.read_json())),
     ),
     _R(
         "POST",
         "/api/identify-cover",
-        lambda h, _: h._respond(_media.handle_identify_cover(h.read_json())),
+        lambda h, _: h._respond(_media.identify_cover(h.read_json())),
     ),
     _R(
         "POST",
         "/api/discogs/add-to-collection/{id}",
-        lambda h, prm: h._respond(_collection.handle_add_to_collection(prm["id"])),
+        lambda h, prm: h._respond(_collection.add_to_collection(prm["id"])),
     ),
     _R(
         "POST",
         "/api/collection/refresh-prices",
-        lambda h, _: h._respond(
-            _collection.handle_refresh_all_prices("force" in h._query())
-        ),
+        lambda h, _: h._respond(_collection.refresh_all_prices("force" in h._query())),
     ),
-    _R("POST", "/api/sync/fetch", lambda h, _: h._respond(_sync_api.handle_fetch())),
+    _R("POST", "/api/sync/fetch", lambda h, _: h._respond(_sync_api.fetch())),
     _R(
         "POST",
         "/api/sync/import",
-        lambda h, _: h._respond(_sync_api.handle_import(h.read_json())),
+        lambda h, _: h._respond(_sync_api.import_(h.read_json())),
     ),
     _R(
         "POST",
         "/api/listens",
-        lambda h, _: h._respond(_listens_api.handle_add(h.read_json())),
+        lambda h, _: h._respond(_listens_api.add(h.read_json())),
     ),
     _R("POST", "/api/backup/now", lambda h, _: _backup_now(h)),
     _R("POST", "/api/backup/disconnect", lambda h, _: _backup_disconnect(h)),
@@ -601,25 +597,23 @@ _ROUTES = [
         "PUT",
         "/api/collection/{id}",
         lambda h, prm: h._respond(
-            _collection.handle_update(_to_int(prm["id"]), h.read_json())
+            _collection.update(_to_int(prm["id"]), h.read_json())
         ),
     ),
     # ── DELETE ──
     _R(
         "DELETE",
         "/api/discogs/collection/{id}",
-        lambda h, prm: h._respond(
-            _discogs_api.handle_remove_from_collection(prm["id"])
-        ),
+        lambda h, prm: h._respond(_discogs_api.remove_from_collection(prm["id"])),
     ),
     _R(
         "DELETE",
         "/api/collection/{id}",
-        lambda h, prm: h._respond(_collection.handle_delete(_to_int(prm["id"]))),
+        lambda h, prm: h._respond(_collection.delete(_to_int(prm["id"]))),
     ),
     _R(
         "DELETE",
         "/api/listens/{id}",
-        lambda h, prm: h._respond(_listens_api.handle_delete(_to_int(prm["id"]))),
+        lambda h, prm: h._respond(_listens_api.delete(_to_int(prm["id"]))),
     ),
 ]

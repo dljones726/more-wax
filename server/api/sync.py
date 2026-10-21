@@ -7,18 +7,18 @@ import threading
 from server.sync import sync_get_state, sync_start_fetch, sync_start_import
 
 
-def handle_status():
+def status():
     return 200, sync_get_state()
 
 
-def handle_fetch():
+def fetch():
     result = sync_start_fetch()
     if "error" in result:
         return (400 if result.get("status") != "error" else 500), result
     return 200, result
 
 
-def handle_import(body: dict):
+def import_(body: dict):
     selected = body.get("selected", [])
     replace_ids = body.get("replace", [])
     if not isinstance(selected, list) or not selected:

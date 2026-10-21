@@ -71,16 +71,16 @@ def count_missing_master_ids() -> int:
     return sum(1 for r in records if r.get("discogs_id") and not r.get("master_id"))
 
 
-def handle_list():
+def list():
     return 200, db_list()
 
 
-def handle_get(rid: int):
+def get(rid: int):
     rec = db_get(rid)
     return (200, rec) if rec else (404, {"error": "Not found"})
 
 
-def handle_add(body: dict):
+def add(body: dict):
     record = {k: body[k] for k in _ADD_FIELDS if k in body}
     record.setdefault("title", "")
     record.setdefault("artist", "")
@@ -94,20 +94,20 @@ def handle_add(body: dict):
     return 201, {"id": new_id, "success": True}
 
 
-def handle_update(rid: int, body: dict):
+def update(rid: int, body: dict):
     fields = {k: body[k] for k in _UPDATE_FIELDS if k in body}
     ok = db_update(rid, fields)
     return 200, {"success": ok}
 
 
-def handle_delete(rid: int):
+def delete(rid: int):
     ok = db_delete(rid)
     if ok:
         listens_delete_for_record(rid)
     return 200, {"success": ok}
 
 
-def handle_details(rid: int):
+def details(rid: int):
     """Return cached Discogs extra details, fetching + caching on first request."""
     rec = db_get(rid)
     if not rec:
@@ -128,7 +128,7 @@ def handle_details(rid: int):
         return discogs_error(e)
 
 
-def handle_add_to_collection(release_id: str):
+def add_to_collection(release_id: str):
     """Add a release to the user's Discogs collection, then backfill master_id."""
     from server.discogs import discogs_add_to_collection
 
@@ -138,7 +138,7 @@ def handle_add_to_collection(release_id: str):
     return 200, {"success": ok}
 
 
-def handle_refresh_all_prices(force: bool):
+def refresh_all_prices(force: bool):
     """Refresh prices for stale (or all) records in a background thread."""
     records = db_list()
     stale = [

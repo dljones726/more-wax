@@ -40,43 +40,43 @@ class TestCollectionHandlers(unittest.TestCase):
     def test_add_get_update_delete_roundtrip(self):
         from server.api import collection
 
-        status, payload = collection.handle_add(
+        status, payload = collection.add(
             {"title": "Discovery", "artist": "Daft Punk", "discogs_id": "111"}
         )
         self.assertEqual(status, 201)
         rid = payload["id"]
 
-        status, rec = collection.handle_get(rid)
+        status, rec = collection.get(rid)
         self.assertEqual(status, 200)
         self.assertEqual(rec["title"], "Discovery")
 
-        status, payload = collection.handle_update(rid, {"title": "Homework"})
+        status, payload = collection.update(rid, {"title": "Homework"})
         self.assertEqual(status, 200)
         self.assertTrue(payload["success"])
-        self.assertEqual(collection.handle_get(rid)[1]["title"], "Homework")
+        self.assertEqual(collection.get(rid)[1]["title"], "Homework")
 
-        status, listing = collection.handle_list()
+        status, listing = collection.list()
         self.assertEqual(status, 200)
         self.assertEqual(len(listing), 1)
 
-        status, payload = collection.handle_delete(rid)
+        status, payload = collection.delete(rid)
         self.assertTrue(payload["success"])
-        self.assertEqual(collection.handle_get(rid), (404, {"error": "Not found"}))
+        self.assertEqual(collection.get(rid), (404, {"error": "Not found"}))
 
     def test_add_only_allowlisted_fields(self):
         from server.api import collection
 
-        _, payload = collection.handle_add(
+        _, payload = collection.add(
             {"title": "X", "artist": "Y", "evil": "DROP TABLE", "discogs_id": "9"}
         )
-        _, rec = collection.handle_get(payload["id"])
+        _, rec = collection.get(payload["id"])
         self.assertNotIn("evil", rec)
 
     def test_duplicate_returns_409(self):
         from server.api import collection
 
-        collection.handle_add({"title": "A", "artist": "B", "discogs_id": "500"})
-        status, payload = collection.handle_add(
+        collection.add({"title": "A", "artist": "B", "discogs_id": "500"})
+        status, payload = collection.add(
             {"title": "A2", "artist": "B2", "discogs_id": "500"}
         )
         self.assertEqual(status, 409)
@@ -90,49 +90,47 @@ class TestValidationBranches(unittest.TestCase):
         from server.api import listens
 
         self.assertEqual(
-            listens.handle_list("not-an-int"),
+            listens.list("not-an-int"),
             (400, {"error": "record_id must be an integer"}),
         )
 
     def test_listens_add_missing_record_id(self):
         from server.api import listens
 
-        status, payload = listens.handle_add({})
+        status, payload = listens.add({})
         self.assertEqual(status, 400)
 
     def test_sync_import_no_selection(self):
         from server.api import sync
 
-        status, payload = sync.handle_import({"selected": []})
+        status, payload = sync.import_({"selected": []})
         self.assertEqual(status, 400)
 
     def test_setup_validate_no_token(self):
         from server.api import settings
 
         self.assertEqual(
-            settings.handle_setup_validate({}),
+            settings.setup_validate({}),
             (400, {"valid": False, "error": "No token provided"}),
         )
 
     def test_convert_image_empty(self):
         from server.api import media
 
-        status, payload = media.handle_convert_image({})
+        status, payload = media.convert_image({})
         self.assertEqual(status, 500)
         self.assertFalse(payload["success"])
 
     def test_discogs_search_no_query(self):
         from server.api import discogs
 
-        status, payload = discogs.handle_search("", "")
+        status, payload = discogs.search("", "")
         self.assertEqual(status, 400)
 
     def test_discogs_release_invalid_id(self):
         from server.api import discogs
 
-        self.assertEqual(
-            discogs.handle_release("abc"), (400, {"error": "Invalid release ID"})
-        )
+        self.assertEqual(discogs.release("abc"), (400, {"error": "Invalid release ID"}))
 
     def test_settings_mask(self):
         from server.api.settings import _mask

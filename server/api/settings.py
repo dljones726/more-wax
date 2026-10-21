@@ -80,11 +80,11 @@ def settings_payload() -> dict:
     }
 
 
-def handle_get_settings():
+def get_settings():
     return 200, settings_payload()
 
 
-def handle_setup(body: dict):
+def setup(body: dict):
     global _anthropic_key_valid
     discogs_token = body.get("discogs_token", "").strip()
     anthropic_key = body.get("anthropic_api_key", "").strip()
@@ -109,7 +109,7 @@ def handle_setup(body: dict):
     }
 
 
-def handle_setup_validate(body: dict):
+def setup_validate(body: dict):
     discogs_token = body.get("discogs_token", "").strip()
     anthropic_key = body.get("anthropic_api_key", "").strip()
 
@@ -174,7 +174,7 @@ def validate_google_oauth(redirect_uri: str) -> dict:
         return {"valid": False, "error": f"Could not reach Google: {e}"}
 
 
-def handle_update_settings(body: dict, redirect_uri: str):
+def update_settings(body: dict, redirect_uri: str):
     """Apply a settings update. Returns (status, settings_payload | error)."""
     global _anthropic_key_valid
 

@@ -6,7 +6,7 @@ from server.database import db_get
 from server.listens import listens_add, listens_delete, listens_list
 
 
-def handle_list(record_id_param: str | None):
+def list(record_id_param: str | None):
     """List listens, newest first. Optional record_id filter (as a string)."""
     record_id = None
     if record_id_param is not None:
@@ -17,7 +17,7 @@ def handle_list(record_id_param: str | None):
     return 200, listens_list(record_id)
 
 
-def handle_add(body: dict):
+def add(body: dict):
     """Log a listen for a record. Body: {record_id: int}."""
     try:
         record_id = int(body.get("record_id"))
@@ -28,5 +28,5 @@ def handle_add(body: dict):
     return 201, listens_add(record_id)
 
 
-def handle_delete(listen_id: int):
+def delete(listen_id: int):
     return 200, {"success": listens_delete(listen_id)}
