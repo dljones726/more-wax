@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────
 //  VIEW ROUTER
 // ─────────────────────────────────────────────────────────────────
-const VIEWS = ['dashboard', 'collection'];
+const VIEWS = ['dashboard', 'collection', 'analytics'];
 
 function navigateTo(view) {
   if (!VIEWS.includes(view)) view = 'dashboard';
@@ -36,6 +36,7 @@ function navigateTo(view) {
   // Trigger view-specific rendering
   if (view === 'dashboard') renderDashboard();
   if (view === 'collection') renderCollection();
+  if (view === 'analytics') renderAnalytics();
 }
 
 function _getViewFromHash() {

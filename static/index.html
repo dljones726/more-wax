@@ -70,6 +70,7 @@
     <nav class="hidden md:flex items-center gap-6 font-body text-sm font-medium mr-4">
       <a href="#dashboard" class="nav-link-top" data-view="dashboard" data-i18n="nav.home">Home</a>
       <a href="#collection" class="nav-link-top" data-view="collection" data-i18n="nav.collection">Collection</a>
+      <a href="#analytics" class="nav-link-top" data-view="analytics">Analytics</a>
       <a href="#" class="nav-link-top" onclick="openScanner();return false" data-i18n="nav.add">Add</a>
     </nav>
     <span id="nav-badge" class="text-xs px-2 py-0.5 rounded-full bg-surface-high text-outline font-label" data-i18n="nav.badge.loading">Loading…</span>
@@ -197,6 +198,8 @@
   </main>
 </div>
 
+<div id="view-analytics" class="view hidden"></div>
+
 <!-- ════════════════════════════════════════════════════════════
      SCANNER VIEW — full-screen camera-first add flow
      ════════════════════════════════════════════════════════════ -->
@@ -312,6 +315,10 @@
   <a href="#collection" data-view="collection" class="bottom-nav-item">
     <i class="bi bi-collection-fill text-xl"></i>
     <span class="font-label text-[10px] uppercase tracking-[0.1em] font-bold" data-i18n="nav.collection">Collection</span>
+  </a>
+    <a href="#analytics" data-view="analytics" class="bottom-nav-item">
+    <i class="bi bi-bar-chart-fill text-xl"></i>
+    <span class="font-label text-[10px] uppercase tracking-[0.1em] font-bold">Analytics</span>
   </a>
   <a href="#" data-view="add" onclick="openScanner();return false" class="bottom-nav-item">
     <i class="bi bi-plus-circle-fill text-xl"></i>
@@ -512,6 +519,7 @@
 <script src="/static/js/api.js"></script>
 <script src="/static/js/router.js"></script>
 <script src="/static/js/dashboard.js"></script>
+<script src="/static/js/analytics.js"></script>
 <script src="/static/js/i18n.js"></script>
 <script src="/static/js/flags.js"></script>
 <script src="/static/js/smart-filter.js"></script>
