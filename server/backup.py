@@ -34,6 +34,7 @@ from server.auth import (
     _sanitize_header,
     audit,
 )
+from server.database import db_export
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
@@ -100,22 +101,22 @@ def disconnect() -> None:
 
 
 def _data_hash() -> str:
-    """Hash the raw bytes of both data files. Cheap and lock-free —
-    writers use atomic os.replace so we never see a torn file."""
+    """Hash the collection (via db_export) + the listens file. Change-detection only."""
     h = hashlib.sha256()
-    for path in (DB_FILE, LISTENS_FILE):
-        try:
-            h.update(path.read_bytes())
-        except OSError:
-            h.update(b"")
-        h.update(b"\x00")
+    h.update(json.dumps(db_export(), sort_keys=True).encode())
+    h.update(b"\x00")
+    try:
+        h.update(LISTENS_FILE.read_bytes())
+    except OSError:
+        h.update(b"")
+    h.update(b"\x00")
     return h.hexdigest()
 
 
 def _build_bundle() -> bytes:
     bundle = {
         "backed_up_at": datetime.now(timezone.utc).isoformat(),
-        "collection": _load_json(DB_FILE),
+        "collection": db_export(),
         "listens": _load_json(LISTENS_FILE),
     }
     return json.dumps(bundle, ensure_ascii=False).encode("utf-8")

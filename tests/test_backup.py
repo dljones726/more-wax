@@ -9,6 +9,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import server.database as _db
+from tests import _dbutil
+
 _tmp = tempfile.mkdtemp(prefix="morewax_backup_test_")
 
 
@@ -28,6 +31,12 @@ class TestBackup(unittest.TestCase):
             if f.exists():
                 f.unlink()
         self.b._access_cache.clear()
+        # The collection half of the hash/bundle now comes from db_export(), so
+        # point server.database at a throwaway .db (and disable legacy import).
+        _dbutil.fresh_db()
+
+    def tearDown(self):
+        _dbutil.close_db()
 
     # ── Retention ───────────────────────────────────────────
 
@@ -59,10 +68,9 @@ class TestBackup(unittest.TestCase):
         self.assertEqual(self.b._data_hash(), self.b._data_hash())
 
     def test_hash_changes_when_collection_changes(self):
-        self._db.write_text('{"records": []}')
         self._listens.write_text('{"listens": []}')
         before = self.b._data_hash()
-        self._db.write_text('{"records": [{"id": 1}]}')
+        _db.db_add({"artist": "X"})  # collection half comes from db_export()
         self.assertNotEqual(before, self.b._data_hash())
 
     def test_hash_changes_when_listens_change(self):
@@ -78,10 +86,10 @@ class TestBackup(unittest.TestCase):
     # ── Bundle ──────────────────────────────────────────────
 
     def test_bundle_contains_both_datasets(self):
-        self._db.write_text('{"records": [{"id": 1}]}')
+        rid = _db.db_add({"artist": "X"})  # collection comes from db_export()
         self._listens.write_text('{"listens": [{"id": 9}]}')
         bundle = json.loads(self.b._build_bundle())
-        self.assertEqual(bundle["collection"]["records"][0]["id"], 1)
+        self.assertEqual(bundle["collection"]["records"][0]["id"], rid)
         self.assertEqual(bundle["listens"]["listens"][0]["id"], 9)
         self.assertIn("backed_up_at", bundle)
 
@@ -116,14 +124,13 @@ class TestBackup(unittest.TestCase):
         self.assertEqual(s["retention"], self.b.RETENTION)
 
     def test_status_pending_when_data_changed(self):
-        self._db.write_text('{"records": []}')
         self._listens.write_text('{"listens": []}')
         self.b._save_json(
             self.b.TOKEN_FILE, {"refresh_token": "r1", "email": "a@b.c"}, private=True
         )
         self.b._save_json(self.b.STATE_FILE, {"last_hash": self.b._data_hash()})
         self.assertFalse(self.b.backup_status()["pending"])
-        self._db.write_text('{"records": [{"id": 2}]}')
+        _db.db_add({"artist": "Y"})  # changes db_export() → hash drifts → pending
         self.assertTrue(self.b.backup_status()["pending"])
 
     def test_backup_now_without_connection_fails(self):

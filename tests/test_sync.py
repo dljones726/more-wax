@@ -1,13 +1,9 @@
 """Tests for the Discogs sync module."""
 
-import json
-import os
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
-import server.config as _config
+from tests import _dbutil
 
 
 class TestSync(unittest.TestCase):
@@ -18,12 +14,10 @@ class TestSync(unittest.TestCase):
         import server.database as db_mod
         import server.sync as sync_mod
 
-        fd, path = tempfile.mkstemp(suffix=".json")
-        os.close(fd)
-        self.db_file = Path(path)
-        # Patch DB_FILE in both config and database modules
-        _config.DB_FILE = self.db_file
-        db_mod.DB_FILE = self.db_file
+        self._db_mod = db_mod
+        self._orig_db = db_mod.DB_FILE
+        self._orig_legacy = db_mod.LEGACY_DB_FILE
+        _dbutil.fresh_db()
 
         self.sync = sync_mod
         sync_mod._master_ids_backfilled = True  # skip backfill in tests
@@ -39,9 +33,8 @@ class TestSync(unittest.TestCase):
                 replaced=0,
                 error=None,
             )
-        # Write a test collection
+        # Seed a test collection (ids 1, 2 preserved)
         self.test_data = {
-            "schema_version": "1.1",
             "records": [
                 {
                     "id": 1,
@@ -62,14 +55,13 @@ class TestSync(unittest.TestCase):
                     "add_source": "search",
                 },
             ],
-            "next_id": 3,
         }
-        with open(self.db_file, "w") as f:
-            json.dump(self.test_data, f)
+        _dbutil.seed(self.test_data["records"])
 
     def tearDown(self):
-        if self.db_file.exists():
-            self.db_file.unlink()
+        _dbutil.close_db()
+        self._db_mod.DB_FILE = self._orig_db
+        self._db_mod.LEGACY_DB_FILE = self._orig_legacy
 
     def _mock_discogs_collection(self):
         """Return mock Discogs collection data."""
@@ -191,12 +183,8 @@ class TestSync(unittest.TestCase):
                 "thumb": "",
             },
         ]
-        # Remove master_id from local so only fuzzy match works
-        with open(self.db_file) as f:
-            data = json.load(f)
-        data["records"][0]["master_id"] = ""
-        with open(self.db_file, "w") as f:
-            json.dump(data, f)
+        # Remove master_id from local record 1 so only fuzzy match works
+        self._db_mod.db_update(1, {"master_id": ""})
 
         result = self.sync.sync_start_fetch()
         self.assertEqual(len(result["diff"]), 1)
@@ -359,8 +347,8 @@ class TestSync(unittest.TestCase):
     def test_import_empty_collection(self, mock_fetch):
         """Import into empty collection should work."""
         # Clear the local DB
-        with open(self.db_file, "w") as f:
-            json.dump({"schema_version": "1.1", "records": [], "next_id": 1}, f)
+        for r in self._db_mod.db_list():
+            self._db_mod.db_delete(r["id"])
 
         mock_fetch.return_value = self._mock_discogs_collection()
         result = self.sync.sync_start_fetch()
@@ -504,30 +492,24 @@ class TestBackfillMasterIds(unittest.TestCase):
         import server.database as db_mod
         import server.sync as sync_mod
 
-        fd, path = tempfile.mkstemp(suffix=".json")
-        os.close(fd)
-        self.db_file = Path(path)
-        _config.DB_FILE = self.db_file
-        db_mod.DB_FILE = self.db_file
+        self._db_mod = db_mod
+        self._orig_db = db_mod.DB_FILE
+        self._orig_legacy = db_mod.LEGACY_DB_FILE
+        _dbutil.fresh_db()
 
         self.sync = sync_mod
         # Reset backfill flag so it runs
         sync_mod._master_ids_backfilled = False
 
     def tearDown(self):
-        if self.db_file.exists():
-            self.db_file.unlink()
+        _dbutil.close_db()
+        self._db_mod.DB_FILE = self._orig_db
+        self._db_mod.LEGACY_DB_FILE = self._orig_legacy
         # Reset flag for other tests
         self.sync._master_ids_backfilled = False
 
     def _write_db(self, records):
-        data = {
-            "schema_version": "1.1",
-            "records": records,
-            "next_id": max((r["id"] for r in records), default=0) + 1,
-        }
-        with open(self.db_file, "w") as f:
-            json.dump(data, f)
+        _dbutil.seed(records)
 
     @patch("server.sync.discogs_fetch_collection")
     def test_phase1_bulk_resolve(self, mock_fetch):
@@ -760,43 +742,9 @@ class TestBackfillMasterIds(unittest.TestCase):
         self.assertEqual(db_get(3)["master_id"], "M3")  # Already had it
 
 
-class TestSchemaMigration(unittest.TestCase):
-    """Test database schema migration."""
-
-    def setUp(self):
-        import server.database as db_mod
-
-        fd, path = tempfile.mkstemp(suffix=".json")
-        os.close(fd)
-        self.db_file = Path(path)
-        _config.DB_FILE = self.db_file
-        db_mod.DB_FILE = self.db_file
-
-    def tearDown(self):
-        if self.db_file.exists():
-            self.db_file.unlink()
-
-    def test_migration_1_0_to_1_1(self):
-        """Migration should add add_source field."""
-        data = {
-            "schema_version": "1.0",
-            "records": [
-                {"id": 1, "discogs_id": "123", "title": "Test"},
-            ],
-            "next_id": 2,
-        }
-        with open(self.db_file, "w") as f:
-            json.dump(data, f)
-
-        from server.database import db_list
-
-        records = db_list()
-        self.assertEqual(records[0].get("add_source"), "barcode")
-
-        # Check schema version was bumped
-        with open(self.db_file) as f:
-            saved = json.load(f)
-        self.assertEqual(saved["schema_version"], "1.1")
+# NOTE: the old 1.0→1.1 JSON load-migration (adding add_source) is now applied
+# during the one-time legacy-JSON import; that behavior is covered by
+# tests/test_database.py::TestLegacyImport.
 
 
 class TestBuildDiff(unittest.TestCase):

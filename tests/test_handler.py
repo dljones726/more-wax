@@ -63,12 +63,15 @@ class TestHandlerRouting(unittest.TestCase):
         cls.server.shutdown()
 
     def setUp(self):
-        """Reset the database before each test."""
-        import server.database as db_mod
+        """Fresh throwaway SQLite DB per test (cached conn reset, legacy import off)."""
+        from tests import _dbutil
 
-        db_mod.DB_FILE = _db_file
-        if _db_file.exists():
-            _db_file.unlink()
+        _dbutil.fresh_db()
+
+    def tearDown(self):
+        from tests import _dbutil
+
+        _dbutil.close_db()
 
     # ── Basic routing ─────────────────────────────────────────
 
