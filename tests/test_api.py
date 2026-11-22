@@ -6,36 +6,23 @@ These call the handler functions with plain inputs and assert on the returned
 extraction from the Handler class.
 """
 
-import json
-import os
-import tempfile
 import unittest
-from pathlib import Path
 
-import server.config as _config
+import server.database as db_mod
+from tests import _dbutil
 
 
 class TestCollectionHandlers(unittest.TestCase):
     def setUp(self):
-        import server.database as db_mod
-
-        self._db_mod = db_mod
-        self._orig_cfg_db = _config.DB_FILE
-        self._orig_mod_db = db_mod.DB_FILE
-        fd, path = tempfile.mkstemp(suffix=".json")
-        os.close(fd)
-        self.db_file = Path(path)
-        _config.DB_FILE = self.db_file
-        db_mod.DB_FILE = self.db_file
-        with open(self.db_file, "w") as f:
-            json.dump({"schema_version": "1.1", "records": [], "next_id": 1}, f)
+        self._orig_db = db_mod.DB_FILE
+        self._orig_legacy = db_mod.LEGACY_DB_FILE
+        _dbutil.fresh_db()  # fresh temp .db, cached conn reset, legacy import off
 
     def tearDown(self):
-        # Restore the module-level DB_FILE so later test modules aren't affected.
-        _config.DB_FILE = self._orig_cfg_db
-        self._db_mod.DB_FILE = self._orig_mod_db
-        if self.db_file.exists():
-            self.db_file.unlink()
+        # Restore module-level paths so later test modules aren't affected.
+        _dbutil.close_db()
+        db_mod.DB_FILE = self._orig_db
+        db_mod.LEGACY_DB_FILE = self._orig_legacy
 
     def test_add_get_update_delete_roundtrip(self):
         from server.api import collection

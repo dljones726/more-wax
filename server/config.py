@@ -13,7 +13,8 @@ DATA_DIR = (
     Path(os.environ["DATA_DIR"]) if "DATA_DIR" in os.environ else BASE_DIR / "data"
 )
 COVERS_DIR = DATA_DIR / "covers"
-DB_FILE = DATA_DIR / "collection.json"
+DB_FILE = DATA_DIR / "collection.db"
+LEGACY_DB_FILE = DATA_DIR / "collection.json"
 LISTENS_FILE = DATA_DIR / "listens.json"
 
 # Ensure data directories exist

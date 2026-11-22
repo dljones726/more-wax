@@ -24,7 +24,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(STATIC_DIR, BASE_DIR / "static")
         self.assertEqual(DATA_DIR, BASE_DIR / "data")
         self.assertEqual(COVERS_DIR, DATA_DIR / "covers")
-        self.assertEqual(DB_FILE, DATA_DIR / "collection.json")
+        self.assertEqual(DB_FILE, DATA_DIR / "collection.db")
 
     def test_discogs_api_url(self):
         from server.config import DISCOGS_API
