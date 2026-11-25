@@ -132,6 +132,8 @@
   "detail.inDiscogsRemove": "Discogsコレクションに登録済み — クリックで削除",
   "detail.notInDiscogsAdd": "Discogs未登録 — クリックで追加",
   "detail.checkingDiscogs": "Discogsを確認中...",
+  "detail.acquired.label": "取得日",
+  "detail.acquired.saved": "取得日を更新しました",
   "detail.notes.title": "メモ",
   "detail.loadingDetails": "詳細を読み込み中…",
 

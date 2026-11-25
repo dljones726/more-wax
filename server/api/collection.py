@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime
 
 from server.api.discogs import backfill_master_id, discogs_error
 from server.database import (
@@ -62,6 +63,7 @@ _UPDATE_FIELDS = (
     "rating_average",
     "rating_count",
     "liked_tracks",
+    "acquired_at",
 )
 
 
@@ -94,8 +96,24 @@ def add(body: dict):
     return 201, {"id": new_id, "success": True}
 
 
+def _normalize_date(value) -> str | None:
+    # "" clears the date; a date or ISO timestamp normalises to YYYY-MM-DD;
+    # anything else returns None so the caller can reject it.
+    if value in ("", None):
+        return ""
+    try:
+        return datetime.fromisoformat(str(value)).date().isoformat()
+    except ValueError:
+        return None
+
+
 def update(rid: int, body: dict):
     fields = {k: body[k] for k in _UPDATE_FIELDS if k in body}
+    if "acquired_at" in fields:
+        normalized = _normalize_date(fields["acquired_at"])
+        if normalized is None:
+            return 400, {"error": "Invalid acquired_at date"}
+        fields["acquired_at"] = normalized
     ok = db_update(rid, fields)
     return 200, {"success": ok}
 

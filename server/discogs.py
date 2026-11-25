@@ -95,6 +95,15 @@ def _parse_prices(stats: dict, suggestions: dict) -> dict:
         if nm.get("value") is not None:
             prices["price_high"] = str(nm["value"])
 
+    # Fall back to the marketplace lowest price when suggestions are unavailable
+    # (Discogs gates price_suggestions behind seller settings).
+    if not prices["price_median"] and stats:
+        lowest = stats.get("lowest_price") or {}
+        if lowest.get("value") is not None:
+            prices["price_low"] = str(lowest["value"])
+            prices["price_median"] = str(lowest["value"])
+            prices["price_currency"] = lowest.get("currency", prices["price_currency"])
+
     return prices
 
 
@@ -458,6 +467,7 @@ def _map_collection_item(item: dict) -> dict | None:
         "styles": json.dumps(info.get("styles") or []),
         "cover_image_url": info.get("cover_image", ""),
         "thumb": info.get("thumb", ""),
+        "acquired_at": item.get("date_added", ""),
     }
 
 

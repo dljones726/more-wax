@@ -21,6 +21,7 @@ import server.auth as _auth
 import server.backup as _backup
 import server.config as _config
 import server.discogs as _discogs_mod
+from server.api import analytics as _analytics
 from server.api import collection as _collection
 from server.api import discogs as _discogs_api
 from server.api import listens as _listens_api
@@ -531,6 +532,7 @@ _ROUTES = [
         ),
     ),
     _R("GET", "/api/backup/status", lambda h, _: h.send_json(_backup.backup_status())),
+    _R("GET", "/api/analytics", lambda h, _: h._respond(_analytics.summary())),
     # ── POST ──
     _R(
         "POST",
