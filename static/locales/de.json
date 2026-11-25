@@ -132,6 +132,8 @@
   "detail.inDiscogsRemove": "In Discogs-Sammlung — klicke zum Entfernen",
   "detail.notInDiscogsAdd": "Nicht in Discogs — klicke zum Hinzufuegen",
   "detail.checkingDiscogs": "Discogs wird geprueft…",
+  "detail.acquired.label": "Erworben",
+  "detail.acquired.saved": "Erwerbsdatum aktualisiert",
   "detail.notes.title": "Notizen",
   "detail.loadingDetails": "Details werden geladen…",
 

@@ -467,6 +467,7 @@ def _map_collection_item(item: dict) -> dict | None:
         "styles": json.dumps(info.get("styles") or []),
         "cover_image_url": info.get("cover_image", ""),
         "thumb": info.get("thumb", ""),
+        "acquired_at": item.get("date_added", ""),
     }
 
 

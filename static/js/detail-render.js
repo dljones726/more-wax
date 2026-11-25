@@ -59,6 +59,15 @@ function _renderPanelHtml(r, peek = false) {
       <!-- Rating -->
       <div ${peek ? '' : 'id="detail-rating-area"'}>${ratingStars(r.rating_average, r.rating_count)}</div>
 
+      <!-- Acquired date -->
+      ${!peek && r.id ? `
+      <div class="flex items-center justify-between gap-3 bg-surface-low rounded-xl px-5 py-3">
+        <span class="font-label text-xs uppercase tracking-widest text-outline">${esc(t('detail.acquired.label'))}</span>
+        <input type="date" value="${r.acquired_at ? esc(String(r.acquired_at).slice(0, 10)) : ''}"
+               onchange="_saveAcquiredAt(${r.id}, this.value)"
+               class="bg-surface-high text-on-surface text-sm rounded-lg px-2 py-1 border border-outline-v/30 focus:border-primary outline-none" />
+      </div>` : ''}
+
       <!-- Notes -->
       ${r.notes ? `
       <div class="bg-surface-top/30 rounded-xl p-5">

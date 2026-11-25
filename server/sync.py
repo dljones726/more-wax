@@ -294,6 +294,7 @@ def _build_import_record(rec: dict) -> dict:
         "genres": rec.get("genres", "[]"),
         "styles": rec.get("styles", "[]"),
         "cover_image_url": rec.get("cover_image_url", ""),
+        "acquired_at": rec.get("acquired_at", ""),
         "add_source": "discogs_sync",
     }
 

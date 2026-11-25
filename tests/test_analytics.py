@@ -100,6 +100,32 @@ class TestHelpers(unittest.TestCase):
         self.assertIsNone(_decade(None))
 
 
+class TestValueOverTime(unittest.TestCase):
+    def test_cumulative_prefers_acquired_at(self):
+        from server.analytics import _value_over_time
+
+        records = [
+            {"acquired_at": "2020-05-01T00:00:00+00:00", "price_median": "20"},
+            {"acquired_at": "2021-03-10", "price_median": "30"},
+            {"acquired_at": "2021-03-10", "price_median": "10"},  # same day collapses
+            {"added_at": "2022-01-01T00:00:00+00:00", "price_median": "5"},  # fallback
+            {"price_median": "99"},  # no date → skipped
+        ]
+        self.assertEqual(
+            _value_over_time(records),
+            [
+                {"date": "2020-05-01", "value": 20.0},
+                {"date": "2021-03-10", "value": 60.0},
+                {"date": "2022-01-01", "value": 65.0},
+            ],
+        )
+
+    def test_empty(self):
+        from server.analytics import _value_over_time
+
+        self.assertEqual(_value_over_time([]), [])
+
+
 class TestAnalyticsEndpoint(unittest.TestCase):
     def setUp(self):
         self._orig_db = db_mod.DB_FILE

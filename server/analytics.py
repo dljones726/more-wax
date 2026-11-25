@@ -62,6 +62,29 @@ def _top(records, key, reverse=True, predicate=None) -> list:
     ]
 
 
+def _value_over_time(records: list) -> list:
+    # Cumulative collection value by acquisition date, preferring the Discogs
+    # date_added (acquired_at) and falling back to when it entered the app.
+    # Uses current prices — we don't store historical price snapshots.
+    dated = []
+    for r in records:
+        when = r.get("acquired_at") or r.get("added_at")
+        if not when:
+            continue
+        dated.append((str(when)[:10], _to_float(r.get("price_median"))))
+    dated.sort(key=lambda t: t[0])
+
+    series: list = []
+    cumulative = 0.0
+    for day, value in dated:
+        cumulative += value
+        if series and series[-1]["date"] == day:
+            series[-1]["value"] = round(cumulative, 2)
+        else:
+            series.append({"date": day, "value": round(cumulative, 2)})
+    return series
+
+
 def compute_summary(records: list) -> dict:
     total_low = total_median = total_high = 0.0
     currency = None
@@ -93,6 +116,7 @@ def compute_summary(records: list) -> dict:
         },
         "by_genre": _rank(by_genre),
         "by_decade": _rank(by_decade, by_name=True),
+        "value_over_time": _value_over_time(records),
         "top_value": _top(records, key=lambda r: _to_float(r.get("price_median"))),
         "rarest": _top(
             records,

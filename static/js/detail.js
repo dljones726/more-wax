@@ -256,6 +256,18 @@ function _attachDetailListeners(modalEl) {
   });
 }
 
+// ── Acquired date ────────────────────────────────────────
+async function _saveAcquiredAt(rid, value) {
+  try {
+    await apiPut(`/api/collection/${rid}`, { acquired_at: value });
+    const r = typeof collection !== 'undefined' && collection.find(x => x.id === rid);
+    if (r) r.acquired_at = value;
+    toast(t('detail.acquired.saved'), 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
 // ── Price refresh ────────────────────────────────────────
 async function _refreshDetailPrices(r) {
   try {
