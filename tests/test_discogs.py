@@ -129,6 +129,25 @@ class TestParsePrices(unittest.TestCase):
         result = _parse_prices({}, suggestions)
         self.assertEqual(result["price_high"], "50.0")
 
+    def test_lowest_price_fallback_when_no_suggestions(self):
+        from server.discogs import _parse_prices
+
+        stats = {"num_for_sale": 13, "lowest_price": {"value": 65.0, "currency": "EUR"}}
+        result = _parse_prices(stats, {})
+        self.assertEqual(result["price_low"], "65.0")
+        self.assertEqual(result["price_median"], "65.0")
+        self.assertEqual(result["price_high"], "")
+        self.assertEqual(result["price_currency"], "EUR")
+
+    def test_suggestions_take_precedence_over_lowest_price(self):
+        from server.discogs import _parse_prices
+
+        stats = {"lowest_price": {"value": 65.0, "currency": "EUR"}}
+        suggestions = {"Very Good Plus (VG+)": {"value": 10.0, "currency": "USD"}}
+        result = _parse_prices(stats, suggestions)
+        self.assertEqual(result["price_median"], "10.0")
+        self.assertEqual(result["price_currency"], "USD")
+
     def test_partial_suggestions(self):
         from server.discogs import _parse_prices
 
